@@ -23,15 +23,14 @@ def patch_one(path: Path, before: str, after: str) -> None:
 def patch_window(root: Path) -> None:
     patch_one(
         root / "Telegram/SourceFiles/window/main_window.cpp",
-        ", _body(body()) {\n\tstyle::PaletteChanged(",
-        """, _body(body()) {
+        "MainWindow::MainWindow(not_null<Controller*> controller)\n: _controller(controller)",
+        """MainWindow::MainWindow(not_null<Controller*> controller)
 #ifdef Q_OS_WIN
-\t// Transparent Telegram: enable native alpha before the HWND is created.
-\tsetAttribute(Qt::WA_TranslucentBackground, true);
-\tsetAttribute(Qt::WA_NoSystemBackground, true);
-\tsetAutoFillBackground(false);
+: Ui::RpWindow(true) // Transparent Telegram: initialize Qt alpha before creating HWND.
+#else
+: Ui::RpWindow()
 #endif
-\tstyle::PaletteChanged(""",
+, _controller(controller)""",
     )
     patch_one(
         root / "Telegram/SourceFiles/mainwindow.cpp",
