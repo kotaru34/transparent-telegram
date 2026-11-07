@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Patch the pinned Telegram Desktop v7.4.1 source checkout for Windows alpha."""
+"""Patch the pinned AyuGram Desktop v7.2.9 source checkout for Windows alpha."""
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
 
-MARK = "Transparent Telegram"
+MARK = "Transparent AyuGram"
 
 
 def patch_one(path: Path, before: str, after: str) -> None:
@@ -26,7 +26,7 @@ def patch_window(root: Path) -> None:
         "MainWindow::MainWindow(not_null<Controller*> controller)\n: _controller(controller)",
         """MainWindow::MainWindow(not_null<Controller*> controller)
 #ifdef Q_OS_WIN
-: Ui::RpWindow(true) // Transparent Telegram: initialize Qt alpha before creating HWND.
+: Ui::RpWindow(true) // Transparent AyuGram: initialize Qt alpha before creating HWND.
 #else
 : Ui::RpWindow()
 #endif
@@ -36,7 +36,7 @@ def patch_window(root: Path) -> None:
         root / "Telegram/SourceFiles/mainwindow.cpp",
         "\tsetAttribute(Qt::WA_OpaquePaintEvent);\n}\n\nvoid MainWindow::initHook()",
         """#ifdef Q_OS_WIN
-\t// Transparent Telegram: preserve the alpha channel in window painting.
+\t// Transparent AyuGram: preserve the alpha channel in window painting.
 \tsetAttribute(Qt::WA_OpaquePaintEvent, false);
 #else
 \tsetAttribute(Qt::WA_OpaquePaintEvent);
@@ -55,7 +55,7 @@ def patch_chat(root: Path) -> None:
 \t\tQRect clip,
 \t\tbool paused) {
 #ifdef Q_OS_WIN
-\t// Transparent Telegram: wallpaper is otherwise painted fully opaque.
+\t// Transparent AyuGram: wallpaper is otherwise painted fully opaque.
 \t// Keep offscreen QPainter overload for preview rendering unchanged.
 \treturn;
 #endif
@@ -77,21 +77,16 @@ def patch_palette(root: Path) -> None:
             raise RuntimeError(f"{path}: palette source anchor mismatch ({found}): {before[:55]!r}")
         source = source.replace(before, after, 1)
 
-    replace("#include <atomic>\n\nnamespace style {\nnamespace {",
-            "#include <atomic>\n#include <array>\n#include <utility>\n\nnamespace style {\nnamespace {")
     replace(
-        """[[nodiscard]] uint64 NextIdentity() {
-\tstatic auto counter = std::atomic<uint64>();
-\treturn counter.fetch_add(1, std::memory_order_relaxed) + 1;
-}
+        '#include "ui/style/style_palette_colorizer.h"\n\nnamespace style {',
+        """#include "ui/style/style_palette_colorizer.h"
+#include <array>
+#include <utility>
 
-} // namespace""",
-        """[[nodiscard]] uint64 NextIdentity() {
-\tstatic auto counter = std::atomic<uint64>();
-\treturn counter.fetch_add(1, std::memory_order_relaxed) + 1;
-}
+namespace style {
+namespace {
 
-// Transparent Telegram: clamp surface alpha, preserving original theme RGB.
+// Transparent AyuGram: clamp surface alpha, preserving original theme RGB.
 // Palettes loaded from caches, custom themes and embedded night theme are covered.
 [[nodiscard]] uchar GlassAlpha(int index, uchar alpha) {
 \tstatic const auto limits = std::array{
@@ -138,7 +133,7 @@ def patch_palette(root: Path) -> None:
 \t\t\talpha);
 }
 
-} // namespace""",
+} // namespace"""
     )
     replace("new (data(i)) internal::ColorData(*other.data(i));",
             "new (data(i)) internal::ColorData(GlassData(i, *other.data(i)));")
@@ -173,15 +168,15 @@ def patch_palette(root: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--tdesktop", required=True, type=Path)
+    parser.add_argument("--ayugram", required=True, type=Path)
     args = parser.parse_args()
-    root = args.tdesktop.resolve()
+    root = args.ayugram.resolve()
     if not (root / "Telegram/lib_ui/ui/colors.palette").is_file():
-        parser.error("Upstream Telegram source or its lib_ui submodule is missing")
+        parser.error("AyuGram source or its lib_ui submodule is missing")
     patch_window(root)
     patch_chat(root)
     patch_palette(root)
-    print("Transparent Telegram: all patches applied")
+    print("Transparent AyuGram: all patches applied")
 
 
 if __name__ == "__main__":
