@@ -1,0 +1,131 @@
+name: Transparent Telegram - Windows x64
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    name: Telegram Desktop 7.4.1 (Windows x64 / Qt6)
+    runs-on: windows-latest
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      TDESKTOP_TAG: v7.4.1
+      TDESKTOP_API_ID: ${{ secrets.TDESKTOP_API_ID }}
+      TDESKTOP_API_HASH: ${{ secrets.TDESKTOP_API_HASH }}
+
+    steps:
+      - name: Assert Windows runner
+        run: |
+          if ($env:RUNNER_OS -ne 'Windows') { throw 'This workflow requires a Windows runner.' }
+          Write-Host "Runner: $env:RUNNER_OS $env:RUNNER_ARCH"
+
+      - name: Check out transparency patch
+        uses: actions/checkout@v4
+
+      - name: Python 3.10 (upstream requirement)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Clone Telegram Desktop and recursive submodules
+        run: |
+          git config --global core.longpaths true
+          $tbuild = Join-Path $env:USERPROFILE 'TBuild'
+          New-Item -ItemType Directory -Force (Join-Path $tbuild 'ThirdParty') | Out-Null
+          New-Item -ItemType Directory -Force (Join-Path $tbuild 'Libraries') | Out-Null
+          "TBUILD=$tbuild" >> $env:GITHUB_ENV
+          "LibrariesPath=$(Join-Path $tbuild 'Libraries\win64')" >> $env:GITHUB_ENV
+          git -c core.longpaths=true clone --recursive --depth 1 --branch $env:TDESKTOP_TAG https://github.com/telegramdesktop/tdesktop.git (Join-Path $tbuild 'tdesktop')
+          if ($LASTEXITCODE -ne 0) { throw 'Telegram source clone failed.' }
+
+      - name: Apply transparency modifications
+        run: |
+          python -m py_compile scripts/apply_transparency.py
+          if ($LASTEXITCODE -ne 0) { throw 'Patch script syntax error.' }
+          python scripts/apply_transparency.py --tdesktop (Join-Path $env:TBUILD 'tdesktop')
+          if ($LASTEXITCODE -ne 0) { throw 'Transparency patch failed – upstream source changed.' }
+
+      - name: Enable MSVC x64 environment
+        uses: Eden-CI/msvc-dev-cmd@master
+        with:
+          arch: x64
+          sdk: '10.0.26100.0'
+          toolset: '14.44'
+
+      - name: Cache third-party sources
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.TBUILD }}\ThirdParty
+          key: ${{ runner.os }}-${{ runner.arch }}-tt-thirdparty-v7.4.1-v1
+
+      - name: Cache compiled third-party libraries
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\*
+            !${{ env.LibrariesPath }}\[qQ]t[_-]*
+          key: ${{ runner.os }}-${{ runner.arch }}-tt-libs-v7.4.1-v1
+
+      - name: Cache built Qt
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.LibrariesPath }}\[qQ]t[_-]*
+          key: ${{ runner.os }}-${{ runner.arch }}-tt-qt6-v7.4.1-v1
+
+      - name: Prepare Telegram libraries (Qt6)
+        run: |
+          & (Join-Path $env:TBUILD 'tdesktop\Telegram\build\prepare\win.bat') silent qt6
+          if ($LASTEXITCODE -ne 0) { throw 'Upstream Windows dependency build failed.' }
+
+      - name: Configure and build Release
+        run: |
+          $apiArguments = @()
+          if ($env:TDESKTOP_API_ID -and $env:TDESKTOP_API_HASH) {
+            $apiArguments = @('-D', "TDESKTOP_API_ID=$env:TDESKTOP_API_ID", '-D', "TDESKTOP_API_HASH=$env:TDESKTOP_API_HASH")
+            "API_MODE=production" >> $env:GITHUB_ENV
+            Write-Host 'Using repository Telegram API secrets (production API).'
+          } elseif (!$env:TDESKTOP_API_ID -and !$env:TDESKTOP_API_HASH) {
+            $apiArguments = @('-D', 'TDESKTOP_API_TEST=ON')
+            "API_MODE=TEST-ONLY" >> $env:GITHUB_ENV
+            Write-Warning 'No API secrets – building TEST-ONLY Telegram, not suitable for normal login.'
+          } else {
+            throw 'Set BOTH TDESKTOP_API_ID and TDESKTOP_API_HASH as Actions secrets.'
+          }
+          Push-Location (Join-Path $env:TBUILD 'tdesktop\Telegram')
+          try {
+            & .\configure.bat x64 qt6 @apiArguments '-D' 'CMAKE_CONFIGURATION_TYPES=Release' '-D' 'CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=' '-D' 'DESKTOP_APP_DISABLE_AUTOUPDATE=ON' '-D' 'DESKTOP_APP_DISABLE_CRASH_REPORTS=ON'
+            if ($LASTEXITCODE -ne 0) { throw 'Telegram CMake configuration failed.' }
+            cmake --build ..\out --config Release --target Telegram --parallel 2
+            if ($LASTEXITCODE -ne 0) { throw 'Telegram build failed.' }
+          } finally {
+            Pop-Location
+          }
+
+      - name: Verify and stage executable
+        run: |
+          $exe = Join-Path $env:TBUILD 'tdesktop\out\Release\Telegram.exe'
+          if (!(Test-Path $exe)) { throw 'Telegram.exe not found; no artifact will be published.' }
+          New-Item -ItemType Directory -Force 'artifact' | Out-Null
+          Copy-Item $exe 'artifact\Telegram.exe'
+          "Upstream: $env:TDESKTOP_TAG" | Set-Content 'artifact\BUILD-INFO.txt'
+          "API mode: $env:API_MODE" | Add-Content 'artifact\BUILD-INFO.txt'
+          "Runner: $env:RUNNER_OS / $env:RUNNER_ARCH" | Add-Content 'artifact\BUILD-INFO.txt'
+          Get-FileHash 'artifact\Telegram.exe' -Algorithm SHA256 | ForEach-Object {
+            "$($_.Hash)  Telegram.exe" | Set-Content 'artifact\SHA256SUMS.txt'
+          }
+
+      - name: Upload portable Windows binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: transparent-telegram-windows-x64-${{ env.API_MODE }}
+          path: artifact/
+          if-no-files-found: error
+          retention-days: 14
