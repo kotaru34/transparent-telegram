@@ -1,4 +1,4 @@
-name: Transparent Telegram - Windows x64
+name: Transparent AyuGram - Windows x64
 
 on:
   push:
@@ -8,16 +8,20 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: transparent-ayugram-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   windows-x64:
-    name: Telegram Desktop 7.4.1 (Windows x64 / Qt6)
+    name: AyuGram Desktop 7.2.9 (Windows x64 / Qt6)
     runs-on: windows-2022
     timeout-minutes: 360
     defaults:
       run:
         shell: pwsh
     env:
-      TDESKTOP_TAG: v7.4.1
+      AYUGRAM_TAG: v7.2.9
       TDESKTOP_API_ID: ${{ secrets.TDESKTOP_API_ID }}
       TDESKTOP_API_HASH: ${{ secrets.TDESKTOP_API_HASH }}
 
@@ -42,7 +46,7 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Clone Telegram Desktop and recursive submodules
+      - name: Clone AyuGram Desktop and required submodules
         run: |
           git config --global core.longpaths true
           $tbuild = Join-Path $env:USERPROFILE 'TBuild'
@@ -50,14 +54,20 @@ jobs:
           New-Item -ItemType Directory -Force (Join-Path $tbuild 'Libraries') | Out-Null
           "TBUILD=$tbuild" >> $env:GITHUB_ENV
           "LibrariesPath=$(Join-Path $tbuild 'Libraries\win64')" >> $env:GITHUB_ENV
-          git -c core.longpaths=true clone --recursive --depth 1 --branch $env:TDESKTOP_TAG https://github.com/telegramdesktop/tdesktop.git (Join-Path $tbuild 'tdesktop')
-          if ($LASTEXITCODE -ne 0) { throw 'Telegram source clone failed.' }
+          $src = Join-Path $tbuild 'tdesktop'
+          git -c core.longpaths=true clone --depth 1 --branch $env:AYUGRAM_TAG https://github.com/AyuGram/AyuGramDesktop.git $src
+          if ($LASTEXITCODE -ne 0) { throw 'AyuGram source clone failed.' }
+          Push-Location $src
+          try {
+            git -c core.longpaths=true submodule update --init --depth 1
+            if ($LASTEXITCODE -ne 0) { throw 'AyuGram submodule initialization failed.' }
+          } finally { Pop-Location }
 
       - name: Apply transparency modifications
         run: |
           python -m py_compile scripts/apply_transparency.py
           if ($LASTEXITCODE -ne 0) { throw 'Patch script syntax error.' }
-          python scripts/apply_transparency.py --tdesktop (Join-Path $env:TBUILD 'tdesktop')
+          python scripts/apply_transparency.py --ayugram (Join-Path $env:TBUILD 'tdesktop')
           if ($LASTEXITCODE -ne 0) { throw 'Transparency patch failed – upstream source changed.' }
 
       - name: Enable MSVC x64 environment
@@ -67,11 +77,17 @@ jobs:
           sdk: '10.0.26100.0'
           toolset: '14.44'
 
+      - name: Verify Visual C++ ATL/MFC headers
+        run: |
+          $header = Join-Path $env:VCToolsInstallDir 'atlmfc\include\atlbase.h'
+          if (!(Test-Path $header)) { throw ('MSVC ATL headers missing at ' + $header) }
+          Write-Host 'ATL headers verified.'
+
       - name: Cache third-party sources
         uses: actions/cache@v4
         with:
           path: ${{ env.TBUILD }}\ThirdParty
-          key: ${{ runner.os }}-${{ runner.arch }}-tt-thirdparty-v7.4.1-v1
+          key: ${{ runner.os }}-${{ runner.arch }}-ayugram-thirdparty-v7.2.9-v1
 
       - name: Cache compiled third-party libraries
         uses: actions/cache@v4
@@ -79,18 +95,18 @@ jobs:
           path: |
             ${{ env.LibrariesPath }}\*
             !${{ env.LibrariesPath }}\[qQ]t[_-]*
-          key: ${{ runner.os }}-${{ runner.arch }}-tt-libs-v7.4.1-v1
+          key: ${{ runner.os }}-${{ runner.arch }}-ayugram-libs-v7.2.9-v1
 
       - name: Cache built Qt
         uses: actions/cache@v4
         with:
           path: ${{ env.LibrariesPath }}\[qQ]t[_-]*
-          key: ${{ runner.os }}-${{ runner.arch }}-tt-qt6-v7.4.1-v1
+          key: ${{ runner.os }}-${{ runner.arch }}-ayugram-qt6-v7.2.9-v1
 
-      - name: Prepare Telegram libraries (Qt6)
+      - name: Prepare AyuGram libraries (Qt6)
         run: |
-          & (Join-Path $env:TBUILD 'tdesktop\Telegram\build\prepare\win.bat') silent qt6
-          if ($LASTEXITCODE -ne 0) { throw 'Upstream Windows dependency build failed.' }
+          & (Join-Path $env:TBUILD 'tdesktop\Telegram\build\prepare\win.bat') silent
+          if ($LASTEXITCODE -ne 0) { throw 'AyuGram Windows dependency build failed.' }
 
       - name: Configure and build Release
         run: |
@@ -99,31 +115,31 @@ jobs:
           Write-Host 'Using repository Telegram API secrets (production API).'
           Push-Location (Join-Path $env:TBUILD 'tdesktop\Telegram')
           try {
-            & .\configure.bat x64 qt6 @apiArguments '-D' 'CMAKE_CONFIGURATION_TYPES=Release' '-D' 'CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=' '-D' 'DESKTOP_APP_DISABLE_AUTOUPDATE=ON' '-D' 'DESKTOP_APP_DISABLE_CRASH_REPORTS=ON'
-            if ($LASTEXITCODE -ne 0) { throw 'Telegram CMake configuration failed.' }
+            & .\configure.bat x64 @apiArguments '-D' 'CMAKE_CONFIGURATION_TYPES=Release' '-D' 'CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=' '-D' 'DESKTOP_APP_DISABLE_AUTOUPDATE=ON' '-D' 'DESKTOP_APP_DISABLE_CRASH_REPORTS=ON'
+            if ($LASTEXITCODE -ne 0) { throw 'AyuGram CMake configuration failed.' }
             cmake --build ..\out --config Release --target Telegram --parallel 2
-            if ($LASTEXITCODE -ne 0) { throw 'Telegram build failed.' }
+            if ($LASTEXITCODE -ne 0) { throw 'AyuGram build failed.' }
           } finally {
             Pop-Location
           }
 
       - name: Verify and stage executable
         run: |
-          $exe = Join-Path $env:TBUILD 'tdesktop\out\Release\Telegram.exe'
-          if (!(Test-Path $exe)) { throw 'Telegram.exe not found; no artifact will be published.' }
+          $exe = Join-Path $env:TBUILD 'tdesktop\out\Release\AyuGram.exe'
+          if (!(Test-Path $exe)) { throw 'AyuGram.exe not found; no artifact will be published.' }
           New-Item -ItemType Directory -Force 'artifact' | Out-Null
-          Copy-Item $exe 'artifact\Telegram.exe'
-          "Upstream: $env:TDESKTOP_TAG" | Set-Content 'artifact\BUILD-INFO.txt'
+          Copy-Item $exe 'artifact\AyuGram.exe'
+          "Upstream: AyuGram Desktop $env:AYUGRAM_TAG" | Set-Content 'artifact\BUILD-INFO.txt'
           "API mode: $env:API_MODE" | Add-Content 'artifact\BUILD-INFO.txt'
           "Runner: $env:RUNNER_OS / $env:RUNNER_ARCH" | Add-Content 'artifact\BUILD-INFO.txt'
-          Get-FileHash 'artifact\Telegram.exe' -Algorithm SHA256 | ForEach-Object {
-            "$($_.Hash)  Telegram.exe" | Set-Content 'artifact\SHA256SUMS.txt'
+          Get-FileHash 'artifact\AyuGram.exe' -Algorithm SHA256 | ForEach-Object {
+            "$($_.Hash)  AyuGram.exe" | Set-Content 'artifact\SHA256SUMS.txt'
           }
 
       - name: Upload portable Windows binary
         uses: actions/upload-artifact@v4
         with:
-          name: transparent-telegram-windows-x64-${{ env.API_MODE }}
+          name: transparent-ayugram-windows-x64-${{ env.API_MODE }}
           path: artifact/
           if-no-files-found: error
           retention-days: 14
