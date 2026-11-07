@@ -1,0 +1,189 @@
+#!/usr/bin/env python3
+"""Patch the pinned Telegram Desktop v7.4.1 source checkout for Windows alpha."""
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+MARK = "Transparent Telegram"
+
+
+def patch_one(path: Path, before: str, after: str) -> None:
+    source = path.read_text(encoding="utf-8")
+    if MARK in source:
+        print("Already patched:", path)
+        return
+    count = source.count(before)
+    if count != 1:
+        raise RuntimeError(f"{path}: source anchor mismatch (expected 1, found {count})")
+    path.write_text(source.replace(before, after, 1), encoding="utf-8", newline="\n")
+    print("Patched:", path)
+
+
+def patch_window(root: Path) -> None:
+    patch_one(
+        root / "Telegram/SourceFiles/window/main_window.cpp",
+        ", _body(body()) {\n\tstyle::PaletteChanged(",
+        """, _body(body()) {
+#ifdef Q_OS_WIN
+\t// Transparent Telegram: enable native alpha before the HWND is created.
+\tsetAttribute(Qt::WA_TranslucentBackground, true);
+\tsetAttribute(Qt::WA_NoSystemBackground, true);
+\tsetAutoFillBackground(false);
+#endif
+\tstyle::PaletteChanged(""",
+    )
+    patch_one(
+        root / "Telegram/SourceFiles/mainwindow.cpp",
+        "\tsetAttribute(Qt::WA_OpaquePaintEvent);\n}\n\nvoid MainWindow::initHook()",
+        """#ifdef Q_OS_WIN
+\t// Transparent Telegram: preserve the alpha channel in window painting.
+\tsetAttribute(Qt::WA_OpaquePaintEvent, false);
+#else
+\tsetAttribute(Qt::WA_OpaquePaintEvent);
+#endif
+}
+
+void MainWindow::initHook()""",
+    )
+
+
+def patch_chat(root: Path) -> None:
+    patch_one(
+        root / "Telegram/SourceFiles/window/section_widget.cpp",
+        "\t\tint fromy,\n\t\tQRect clip,\n\t\tbool paused) {\n\tauto p = QPainter(widget);",
+        """\t\tint fromy,
+\t\tQRect clip,
+\t\tbool paused) {
+#ifdef Q_OS_WIN
+\t// Transparent Telegram: wallpaper is otherwise painted fully opaque.
+\t// Keep offscreen QPainter overload for preview rendering unchanged.
+\treturn;
+#endif
+\tauto p = QPainter(widget);""",
+    )
+
+
+def patch_palette(root: Path) -> None:
+    path = root / "Telegram/lib_ui/ui/style/style_core_palette.cpp"
+    source = path.read_text(encoding="utf-8")
+    if MARK in source:
+        print("Already patched:", path)
+        return
+
+    def replace(before: str, after: str) -> None:
+        nonlocal source
+        found = source.count(before)
+        if found != 1:
+            raise RuntimeError(f"{path}: palette source anchor mismatch ({found}): {before[:55]!r}")
+        source = source.replace(before, after, 1)
+
+    replace("#include <atomic>\n\nnamespace style {\nnamespace {",
+            "#include <atomic>\n#include <array>\n#include <utility>\n\nnamespace style {\nnamespace {")
+    replace(
+        """[[nodiscard]] uint64 NextIdentity() {
+\tstatic auto counter = std::atomic<uint64>();
+\treturn counter.fetch_add(1, std::memory_order_relaxed) + 1;
+}
+
+} // namespace""",
+        """[[nodiscard]] uint64 NextIdentity() {
+\tstatic auto counter = std::atomic<uint64>();
+\treturn counter.fetch_add(1, std::memory_order_relaxed) + 1;
+}
+
+// Transparent Telegram: clamp surface alpha, preserving original theme RGB.
+// Palettes loaded from caches, custom themes and embedded night theme are covered.
+[[nodiscard]] uchar GlassAlpha(int index, uchar alpha) {
+\tstatic const auto limits = std::array{
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("windowBg")), uchar(0x65) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("windowBgOver")), uchar(0x90) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("dialogsBg")), uchar(0x65) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("dialogsBgOver")), uchar(0x85) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("topBarBg")), uchar(0x6A) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("titleBg")), uchar(0x55) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("titleBgActive")), uchar(0x55) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("sideBarBg")), uchar(0x65) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("mainMenuBg")), uchar(0xB0) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("menuBg")), uchar(0xC0) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("boxBg")), uchar(0xC8) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("historyComposeAreaBg")), uchar(0x82) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("historyReplyBg")), uchar(0x96) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("historyPinnedBg")), uchar(0x9C) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("msgInBg")), uchar(0xB8) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("msgOutBg")), uchar(0xB8) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("filterInputActiveBg")), uchar(0xA0) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("filterInputInactiveBg")), uchar(0xA0) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("emojiPanBg")), uchar(0xB0) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("emojiPanCategories")), uchar(0xB0) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("emojiPanHeaderBg")), uchar(0xB0) },
+\t};
+\tfor (const auto &[key, maximum] : limits) {
+\t\tif (key == index && alpha > maximum) {
+\t\t\treturn maximum;
+\t\t}
+\t}
+\treturn alpha;
+}
+
+[[nodiscard]] internal::ColorData GlassData(
+\t\tint index,
+\t\tconst internal::ColorData &original) {
+\tconst auto alpha = GlassAlpha(index, uchar(original.c.alpha()));
+\treturn (alpha == original.c.alpha())
+\t\t? original
+\t\t: internal::ColorData(
+\t\t\tuchar(original.c.red()),
+\t\t\tuchar(original.c.green()),
+\t\t\tuchar(original.c.blue()),
+\t\t\talpha);
+}
+
+} // namespace""",
+    )
+    replace("new (data(i)) internal::ColorData(*other.data(i));",
+            "new (data(i)) internal::ColorData(GlassData(i, *other.data(i)));")
+    replace("*data(i) = *other.data(i);",
+            "*data(i) = GlassData(i, *other.data(i));")
+    replace("new (data(index)) internal::ColorData(*data(fallbackIndex));",
+            "new (data(index)) internal::ColorData(GlassData(index, *data(fallbackIndex)));")
+    replace("new (data(index)) internal::ColorData(value.r, value.g, value.b, value.a);",
+            "new (data(index)) internal::ColorData(value.r, value.g, value.b, GlassAlpha(index, value.a));")
+    replace(
+        """void palette::setData(int index, const internal::ColorData &value) {
+\tif (_status[index] == Status::Initial) {
+\t\tnew (data(index)) internal::ColorData(value);
+\t} else {
+\t\t*data(index) = value;
+\t}
+\t_status[index] = Status::Loaded;
+}""",
+        """void palette::setData(int index, const internal::ColorData &value) {
+\tconst auto glass = GlassData(index, value);
+\tif (_status[index] == Status::Initial) {
+\t\tnew (data(index)) internal::ColorData(glass);
+\t} else {
+\t\t*data(index) = glass;
+\t}
+\t_status[index] = Status::Loaded;
+}""",
+    )
+    path.write_text(source, encoding="utf-8", newline="\n")
+    print("Patched:", path)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--tdesktop", required=True, type=Path)
+    args = parser.parse_args()
+    root = args.tdesktop.resolve()
+    if not (root / "Telegram/lib_ui/ui/colors.palette").is_file():
+        parser.error("Upstream Telegram source or its lib_ui submodule is missing")
+    patch_window(root)
+    patch_chat(root)
+    patch_palette(root)
+    print("Transparent Telegram: all patches applied")
+
+
+if __name__ == "__main__":
+    main()
