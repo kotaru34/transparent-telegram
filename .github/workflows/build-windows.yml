@@ -105,6 +105,18 @@ jobs:
 
       - name: Prepare AyuGram libraries (Qt6)
         run: |
+          # AyuGram v7.2.9 requests a MINGW64 diffutils package removed
+          # from MSYS2's repositories. The MSYS diffutils package supplies
+          # the required diff/cmp utilities on PATH.
+          $prepare = Join-Path $env:TBUILD 'tdesktop\Telegram\build\prepare\prepare.py'
+          $source = [System.IO.File]::ReadAllText($prepare)
+          $oldPackage = 'mingw-w64-x86_64-diffutils ^'
+          if ($source.Split(@($oldPackage), [System.StringSplitOptions]::None).Length -ne 2) {
+            throw 'AyuGram MSYS2 dependency patch anchor did not match exactly once.'
+          }
+          $source = $source.Replace($oldPackage, 'diffutils ^')
+          [System.IO.File]::WriteAllText($prepare, $source, [System.Text.UTF8Encoding]::new($false))
+          Write-Host 'Replaced obsolete MINGW64 diffutils dependency with MSYS diffutils.'
           & (Join-Path $env:TBUILD 'tdesktop\Telegram\build\prepare\win.bat') silent
           if ($LASTEXITCODE -ne 0) { throw 'AyuGram Windows dependency build failed.' }
 
