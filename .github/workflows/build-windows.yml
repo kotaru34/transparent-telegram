@@ -27,6 +27,13 @@ jobs:
           if ($env:RUNNER_OS -ne 'Windows') { throw 'This workflow requires a Windows runner.' }
           Write-Host "Runner: $env:RUNNER_OS $env:RUNNER_ARCH"
 
+      - name: Require production Telegram API credentials
+        run: |
+          if (!$env:TDESKTOP_API_ID -or !$env:TDESKTOP_API_HASH) {
+            throw 'Missing TDESKTOP_API_ID or TDESKTOP_API_HASH Actions secret. Stopping before dependency compilation.'
+          }
+          Write-Host 'Both Telegram API credentials are configured.'
+
       - name: Check out transparency patch
         uses: actions/checkout@v4
 
@@ -87,18 +94,9 @@ jobs:
 
       - name: Configure and build Release
         run: |
-          $apiArguments = @()
-          if ($env:TDESKTOP_API_ID -and $env:TDESKTOP_API_HASH) {
-            $apiArguments = @('-D', "TDESKTOP_API_ID=$env:TDESKTOP_API_ID", '-D', "TDESKTOP_API_HASH=$env:TDESKTOP_API_HASH")
-            "API_MODE=production" >> $env:GITHUB_ENV
-            Write-Host 'Using repository Telegram API secrets (production API).'
-          } elseif (!$env:TDESKTOP_API_ID -and !$env:TDESKTOP_API_HASH) {
-            $apiArguments = @('-D', 'TDESKTOP_API_TEST=ON')
-            "API_MODE=TEST-ONLY" >> $env:GITHUB_ENV
-            Write-Warning 'No API secrets – building TEST-ONLY Telegram, not suitable for normal login.'
-          } else {
-            throw 'Set BOTH TDESKTOP_API_ID and TDESKTOP_API_HASH as Actions secrets.'
-          }
+          $apiArguments = @('-D', "TDESKTOP_API_ID=$env:TDESKTOP_API_ID", '-D', "TDESKTOP_API_HASH=$env:TDESKTOP_API_HASH")
+          "API_MODE=production" >> $env:GITHUB_ENV
+          Write-Host 'Using repository Telegram API secrets (production API).'
           Push-Location (Join-Path $env:TBUILD 'tdesktop\Telegram')
           try {
             & .\configure.bat x64 qt6 @apiArguments '-D' 'CMAKE_CONFIGURATION_TYPES=Release' '-D' 'CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=' '-D' 'DESKTOP_APP_DISABLE_AUTOUPDATE=ON' '-D' 'DESKTOP_APP_DISABLE_CRASH_REPORTS=ON'
