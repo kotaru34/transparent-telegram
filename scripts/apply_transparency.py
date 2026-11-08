@@ -64,6 +64,17 @@ def patch_chat(root: Path) -> None:
 
 
 def patch_palette(root: Path) -> None:
+    header = root / "Telegram/lib_ui/ui/style/style_core_palette.h"
+    patch_one(
+        header,
+        "\tvoid setData(int index, const internal::ColorData &value);",
+        """\tvoid setData(int index, const internal::ColorData &value);
+\t// Transparent AyuGram: this class is a friend of ColorData, so only
+\t// member functions may use its private copy and RGBA constructors.
+\t[[nodiscard]] static internal::ColorData GlassData(
+\t\tint index, const internal::ColorData &original);""",
+    )
+
     path = root / "Telegram/lib_ui/ui/style/style_core_palette.cpp"
     source = path.read_text(encoding="utf-8")
     if MARK in source:
@@ -120,7 +131,11 @@ namespace {
 \treturn alpha;
 }
 
-[[nodiscard]] internal::ColorData GlassData(
+} // namespace
+
+// Declared as a member of palette: ColorData constructors are private,
+// and palette is the only authorized friend for palette transformations.
+internal::ColorData palette::GlassData(
 \t\tint index,
 \t\tconst internal::ColorData &original) {
 \tconst auto alpha = GlassAlpha(index, uchar(original.c.alpha()));
@@ -131,9 +146,7 @@ namespace {
 \t\t\tuchar(original.c.green()),
 \t\t\tuchar(original.c.blue()),
 \t\t\talpha);
-}
-
-} // namespace"""
+}"""
     )
     replace("new (data(i)) internal::ColorData(*other.data(i));",
             "new (data(i)) internal::ColorData(GlassData(i, *other.data(i)));")
