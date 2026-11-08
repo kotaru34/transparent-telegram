@@ -55,11 +55,79 @@ def patch_chat(root: Path) -> None:
 \t\tQRect clip,
 \t\tbool paused) {
 #ifdef Q_OS_WIN
-\t// Transparent AyuGram: wallpaper is otherwise painted fully opaque.
-\t// Keep offscreen QPainter overload for preview rendering unchanged.
+\t// Transparent AyuGram: a fully clear chat is click-through on Windows
+\t// layered windows. Paint a nonzero-alpha glass surface, with Source
+\t// composition to replace stale backing-store pixels after scrolling.
+\tauto glass = st::windowBg->c;
+\tif (glass.alpha() == 0) {
+\t\tglass.setAlpha(1);
+\t}
+\tauto p = QPainter(widget);
+\tp.setCompositionMode(QPainter::CompositionMode_Source);
+\tp.fillRect(clip, glass);
 \treturn;
 #endif
 \tauto p = QPainter(widget);""",
+    )
+
+
+def patch_main_menu(root: Path) -> None:
+    path = root / "Telegram/SourceFiles/window/window_main_menu.cpp"
+    source = path.read_text(encoding="utf-8")
+    if MARK in source:
+        print("Already patched:", path)
+        return
+
+    replacements = [
+        (
+            "\\tsetAttribute(Qt::WA_OpaquePaintEvent);",
+            """#ifdef Q_OS_WIN
+\\t// Transparent AyuGram: the menu is NOT opaque.
+\\tsetAttribute(Qt::WA_OpaquePaintEvent, false);
+#else
+\\tsetAttribute(Qt::WA_OpaquePaintEvent);
+#endif""",
+        ),
+        (
+            "\\tp.fillRect(clip, st::mainMenuBg);\\n\\tif (cover.intersects(clip)) {",
+            """#ifdef Q_OS_WIN
+\\t// Transparent AyuGram: do not alpha-blend repeatedly with old pixels
+\\t// while this menu is scrolling, moving or being hovered.
+\\tp.setCompositionMode(QPainter::CompositionMode_Source);
+\\tp.fillRect(clip, st::mainMenuBg);
+\\tp.setCompositionMode(QPainter::CompositionMode_SourceOver);
+#else
+\\tp.fillRect(clip, st::mainMenuBg);
+#endif
+\\tif (cover.intersects(clip)) {""",
+        ),
+    ]
+    for original, replacement in replacements:
+        count = source.count(original)
+        if count != 1:
+            raise RuntimeError(f"{path}: menu anchor mismatch (expected 1, found {count})")
+        source = source.replace(original, replacement, 1)
+    path.write_text(source, encoding="utf-8", newline="\\n")
+    print("Patched:", path)
+
+
+def patch_scroll(root: Path) -> None:
+    patch_one(
+        root / "Telegram/lib_ui/ui/widgets/scroll_area.cpp",
+        "\\tQScrollArea::scrollContentsBy(dx, dy);\\n}",
+        """\\tQScrollArea::scrollContentsBy(dx, dy);
+#ifdef Q_OS_WIN
+\\t// Transparent AyuGram: Qt's scroll-copy optimization can retain
+\\t// old translucent rows in the backing store. Invalidate the visible
+\\t// content and viewport after moving the scrollable widget.
+\\tif (window()->testAttribute(Qt::WA_TranslucentBackground)) {
+\\t\\tif (auto content = widget()) {
+\\t\\t\\tcontent->update();
+\\t\\t}
+\\t\\tviewport()->update();
+\\t}
+#endif
+}""",
     )
 
 
@@ -98,7 +166,7 @@ namespace style {
 namespace {
 
 // Transparent AyuGram: clamp surface alpha, preserving original theme RGB.
-// Palettes loaded from caches, custom themes and embedded night theme are covered.
+// Opaque palette defaults are softened; explicit RGBA custom theme alpha wins.
 [[nodiscard]] uchar GlassAlpha(int index, uchar alpha) {
 \tstatic const auto limits = std::array{
 \t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("windowBg")), uchar(0x65) },
@@ -122,9 +190,23 @@ namespace {
 \t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("emojiPanBg")), uchar(0xB0) },
 \t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("emojiPanCategories")), uchar(0xB0) },
 \t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("emojiPanHeaderBg")), uchar(0xB0) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("windowBgRipple")), uchar(0xA0) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("menuBgOver")), uchar(0xD2) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("menuBgRipple")), uchar(0xD5) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("mainMenuCoverBg")), uchar(0xC8) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("contactsBg")), uchar(0xAB) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("contactsBgOver")), uchar(0xC5) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("boxSearchBg")), uchar(0xC8) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("boxDividerBg")), uchar(0x98) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("lightButtonBg")), uchar(0x9D) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("lightButtonBgOver")), uchar(0xAE) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("lightButtonBgRipple")), uchar(0xB5) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("sideBarBgActive")), uchar(0x9A) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("sideBarBgRipple")), uchar(0xA5) },
+\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("dialogsBgActive")), uchar(0xBF) },
 \t};
 \tfor (const auto &[key, maximum] : limits) {
-\t\tif (key == index && alpha > maximum) {
+\t\tif (key == index && alpha == uchar(255)) {
 \t\t\treturn maximum;
 \t\t}
 \t}
@@ -188,6 +270,8 @@ def main() -> None:
         parser.error("AyuGram source or its lib_ui submodule is missing")
     patch_window(root)
     patch_chat(root)
+    patch_main_menu(root)
+    patch_scroll(root)
     patch_palette(root)
     print("Transparent AyuGram: all patches applied")
 
