@@ -126,6 +126,7 @@ jobs:
       # Explicit saves are run before application compilation so a failed
       # AyuGram C++ build does not discard expensive dependency/Qt builds.
       - name: Save prepared third-party sources cache
+        continue-on-error: true
         if: steps.third-party-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
@@ -133,6 +134,7 @@ jobs:
           key: ${{ steps.third-party-cache.outputs.cache-primary-key }}
 
       - name: Save prepared compiled libraries cache
+        continue-on-error: true
         if: steps.compiled-libs-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
@@ -142,6 +144,7 @@ jobs:
           key: ${{ steps.compiled-libs-cache.outputs.cache-primary-key }}
 
       - name: Save prepared Qt cache
+        continue-on-error: true
         if: steps.qt-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
