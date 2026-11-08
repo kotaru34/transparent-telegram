@@ -13,10 +13,54 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  preflight:
+    name: Preflight - patch pinned AyuGram sources
+    runs-on: windows-2022
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out patch
+        uses: actions/checkout@v4
+
+      - name: Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Download only patched source files and validate all anchors
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP 'ayugram-patch-preflight'
+          $ayuBase = 'https://raw.githubusercontent.com/AyuGram/AyuGramDesktop/v7.2.9/'
+          $uiBase = 'https://raw.githubusercontent.com/AyuGram/lib_ui/e3d058223aea0b68938a07a7d436d67aaf2b1b30/'
+          $sources = @(
+            @{ base = $ayuBase; path = 'Telegram/SourceFiles/window/main_window.cpp' },
+            @{ base = $ayuBase; path = 'Telegram/SourceFiles/mainwindow.cpp' },
+            @{ base = $ayuBase; path = 'Telegram/SourceFiles/window/section_widget.cpp' },
+            @{ base = $ayuBase; path = 'Telegram/SourceFiles/window/window_main_menu.cpp' },
+            @{ base = $uiBase; path = 'Telegram/lib_ui/ui/colors.palette'; source = 'ui/colors.palette' },
+            @{ base = $uiBase; path = 'Telegram/lib_ui/ui/style/style_core_palette.h'; source = 'ui/style/style_core_palette.h' },
+            @{ base = $uiBase; path = 'Telegram/lib_ui/ui/style/style_core_palette.cpp'; source = 'ui/style/style_core_palette.cpp' },
+            @{ base = $uiBase; path = 'Telegram/lib_ui/ui/widgets/scroll_area.cpp'; source = 'ui/widgets/scroll_area.cpp' }
+          )
+          foreach ($file in $sources) {
+            $target = Join-Path $root $file.path
+            New-Item -ItemType Directory -Path (Split-Path $target -Parent) -Force | Out-Null
+            $source = if ($file.source) { $file.source } else { $file.path }
+            Invoke-WebRequest -Uri ($file.base + $source) -OutFile $target -TimeoutSec 60 -ErrorAction Stop
+          }
+          python -m py_compile scripts/apply_transparency.py
+          if ($LASTEXITCODE -ne 0) { throw 'Transparency patch has invalid Python syntax.' }
+          python scripts/apply_transparency.py --ayugram $root
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned AyuGram patch preflight failed. Expensive Windows compilation was not started.' }
+          Write-Host 'Pinned AyuGram source patches verified; the full build may proceed.'
+
   windows-x64:
-    name: AyuGram Desktop 7.2.9 (Windows x64 / Qt6)
+    name: AyuGram Desktop 7.2.9 (Windows x64 / Qt5)
     runs-on: windows-2022
     timeout-minutes: 360
+    needs: preflight
     defaults:
       run:
         shell: pwsh
@@ -106,7 +150,7 @@ jobs:
           path: ${{ env.LibrariesPath }}\[qQ]t[_-]*
           key: ${{ runner.os }}-${{ runner.arch }}-ayugram-qt6-v7.2.9-v1
 
-      - name: Prepare AyuGram libraries (Qt6)
+      - name: Prepare AyuGram libraries (Qt5)
         run: |
           # AyuGram v7.2.9 requests a MINGW64 diffutils package removed
           # from MSYS2's repositories. The MSYS diffutils package supplies
@@ -158,9 +202,24 @@ jobs:
           Write-Host 'Using repository Telegram API secrets (production API).'
           Push-Location (Join-Path $env:TBUILD 'tdesktop\Telegram')
           try {
+            # Pinned cmake_helpers enables bare /MP. It can spawn many cl.exe
+            # processes even when CMake --parallel is low, causing MSVC C1060
+            # on standard GitHub-hosted Windows runners.
+            $optionsPath = Join-Path $env:TBUILD 'tdesktop\cmake\options_win.cmake'
+            $options = [System.IO.File]::ReadAllText($optionsPath)
+            $oldFlag = '/MP     # Enable multi process build.'
+            if ($options.Split(@($oldFlag), [System.StringSplitOptions]::None).Length -ne 2) {
+              throw 'Cannot disable upstream MSVC /MP: compiler options changed.'
+            }
+            $options = $options.Replace($oldFlag, '# /MP disabled: avoid MSVC C1060 on hosted Windows runners.')
+            [System.IO.File]::WriteAllText($optionsPath, $options, [System.Text.UTF8Encoding]::new($false))
+            $env:CL_MPCount = '1'
+            Write-Host 'Memory-safe mode: MSVC /MP disabled, one MSBuild worker.'
+            $ramGiB = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 2)
+            Write-Host "Installed RAM: $ramGiB GiB."
             & .\configure.bat x64 @apiArguments '-D' 'CMAKE_CONFIGURATION_TYPES=Release' '-D' 'CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=' '-D' 'DESKTOP_APP_DISABLE_AUTOUPDATE=ON' '-D' 'DESKTOP_APP_DISABLE_CRASH_REPORTS=ON'
             if ($LASTEXITCODE -ne 0) { throw 'AyuGram CMake configuration failed.' }
-            cmake --build ..\out --config Release --target Telegram --parallel 2
+            cmake --build ..\out --config Release --target Telegram --parallel 1 -- /m:1 /nodeReuse:false
             if ($LASTEXITCODE -ne 0) { throw 'AyuGram build failed.' }
           } finally {
             Pop-Location

@@ -6,7 +6,7 @@ Unofficial build of [AyuGram Desktop](https://github.com/AyuGram/AyuGramDesktop)
 
 ## Build on Windows
 
-GitHub Actions uses a hosted **Windows Server 2022 x64** runner, Python 3.10, Qt 6 and MSVC 14.44. No self-hosted Windows laptop is required.
+GitHub Actions uses a hosted **Windows Server 2022 x64** runner, Python 3.10, Qt 5 (upstream v7.2.9 default) and MSVC 14.44. No self-hosted Windows laptop is required.
 
 Configure two **Repository secrets** in **Settings > Secrets and variables > Actions**:
 
@@ -26,3 +26,7 @@ Qt and Windhawk may behave differently across Windows builds, and some custom su
 ## Build resource usage
 
 Compiling third-party dependencies and Qt from source is resource-intensive. The workflow uses Windows-hosted CI rather than requiring your personal machine. Until GitHub Actions completes with success, the project should be treated as source and build instructions rather than a ready executable.
+
+## CI resource safety
+
+The full Windows build is gated by a short Windows preflight job that applies all patches to the pinned upstream source files before dependency preparation. The build removes the upstream CMake `/MP` option and uses one MSBuild worker to prevent MSVC `C1060` heap exhaustion on standard GitHub-hosted Windows runners. This may increase build time but avoids uncontrolled compiler concurrency; dependency/Qt caches are preserved.
