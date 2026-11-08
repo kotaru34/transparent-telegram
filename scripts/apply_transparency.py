@@ -80,26 +80,26 @@ def patch_main_menu(root: Path) -> None:
 
     replacements = [
         (
-            "\\tsetAttribute(Qt::WA_OpaquePaintEvent);",
+            "\tsetAttribute(Qt::WA_OpaquePaintEvent);",
             """#ifdef Q_OS_WIN
-\\t// Transparent AyuGram: the menu is NOT opaque.
-\\tsetAttribute(Qt::WA_OpaquePaintEvent, false);
+\t// Transparent AyuGram: the menu is NOT opaque.
+\tsetAttribute(Qt::WA_OpaquePaintEvent, false);
 #else
-\\tsetAttribute(Qt::WA_OpaquePaintEvent);
+\tsetAttribute(Qt::WA_OpaquePaintEvent);
 #endif""",
         ),
         (
-            "\\tp.fillRect(clip, st::mainMenuBg);\\n\\tif (cover.intersects(clip)) {",
+            "\tp.fillRect(clip, st::mainMenuBg);\n\tif (cover.intersects(clip)) {",
             """#ifdef Q_OS_WIN
-\\t// Transparent AyuGram: do not alpha-blend repeatedly with old pixels
-\\t// while this menu is scrolling, moving or being hovered.
-\\tp.setCompositionMode(QPainter::CompositionMode_Source);
-\\tp.fillRect(clip, st::mainMenuBg);
-\\tp.setCompositionMode(QPainter::CompositionMode_SourceOver);
+\t// Transparent AyuGram: do not alpha-blend repeatedly with old pixels
+\t// while this menu is scrolling, moving or being hovered.
+\tp.setCompositionMode(QPainter::CompositionMode_Source);
+\tp.fillRect(clip, st::mainMenuBg);
+\tp.setCompositionMode(QPainter::CompositionMode_SourceOver);
 #else
-\\tp.fillRect(clip, st::mainMenuBg);
+\tp.fillRect(clip, st::mainMenuBg);
 #endif
-\\tif (cover.intersects(clip)) {""",
+\tif (cover.intersects(clip)) {""",
         ),
     ]
     for original, replacement in replacements:
@@ -107,25 +107,25 @@ def patch_main_menu(root: Path) -> None:
         if count != 1:
             raise RuntimeError(f"{path}: menu anchor mismatch (expected 1, found {count})")
         source = source.replace(original, replacement, 1)
-    path.write_text(source, encoding="utf-8", newline="\\n")
+    path.write_text(source, encoding="utf-8", newline="\n")
     print("Patched:", path)
 
 
 def patch_scroll(root: Path) -> None:
     patch_one(
         root / "Telegram/lib_ui/ui/widgets/scroll_area.cpp",
-        "\\tQScrollArea::scrollContentsBy(dx, dy);\\n}",
-        """\\tQScrollArea::scrollContentsBy(dx, dy);
+        "\tQScrollArea::scrollContentsBy(dx, dy);\n}",
+        """\tQScrollArea::scrollContentsBy(dx, dy);
 #ifdef Q_OS_WIN
-\\t// Transparent AyuGram: Qt's scroll-copy optimization can retain
-\\t// old translucent rows in the backing store. Invalidate the visible
-\\t// content and viewport after moving the scrollable widget.
-\\tif (window()->testAttribute(Qt::WA_TranslucentBackground)) {
-\\t\\tif (auto content = widget()) {
-\\t\\t\\tcontent->update();
-\\t\\t}
-\\t\\tviewport()->update();
-\\t}
+\t// Transparent AyuGram: Qt's scroll-copy optimization can retain
+\t// old translucent rows in the backing store. Invalidate the visible
+\t// content and viewport after moving the scrollable widget.
+\tif (window()->testAttribute(Qt::WA_TranslucentBackground)) {
+\t\tif (auto content = widget()) {
+\t\t\tcontent->update();
+\t\t}
+\t\tviewport()->update();
+\t}
 #endif
 }""",
     )
@@ -190,20 +190,6 @@ namespace {
 \t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("emojiPanBg")), uchar(0xB0) },
 \t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("emojiPanCategories")), uchar(0xB0) },
 \t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("emojiPanHeaderBg")), uchar(0xB0) },
-\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("windowBgRipple")), uchar(0xA0) },
-\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("menuBgOver")), uchar(0xD2) },
-\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("menuBgRipple")), uchar(0xD5) },
-\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("mainMenuCoverBg")), uchar(0xC8) },
-\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("contactsBg")), uchar(0xAB) },
-\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("contactsBgOver")), uchar(0xC5) },
-\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("boxSearchBg")), uchar(0xC8) },
-\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("boxDividerBg")), uchar(0x98) },
-\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("lightButtonBg")), uchar(0x9D) },
-\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("lightButtonBgOver")), uchar(0xAE) },
-\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("lightButtonBgRipple")), uchar(0xB5) },
-\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("sideBarBgActive")), uchar(0x9A) },
-\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("sideBarBgRipple")), uchar(0xA5) },
-\t\tstd::pair{ internal::GetPaletteIndex(QLatin1String("dialogsBgActive")), uchar(0xBF) },
 \t};
 \tfor (const auto &[key, maximum] : limits) {
 \t\tif (key == index && alpha == uchar(255)) {
