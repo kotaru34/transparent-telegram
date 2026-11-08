@@ -83,22 +83,25 @@ jobs:
           if (!(Test-Path $header)) { throw ('MSVC ATL headers missing at ' + $header) }
           Write-Host 'ATL headers verified.'
 
-      - name: Cache third-party sources
-        uses: actions/cache@v4
+      - name: Restore third-party sources cache
+        id: third-party-cache
+        uses: actions/cache/restore@v4
         with:
           path: ${{ env.TBUILD }}\ThirdParty
           key: ${{ runner.os }}-${{ runner.arch }}-ayugram-thirdparty-v7.2.9-v1
 
-      - name: Cache compiled third-party libraries
-        uses: actions/cache@v4
+      - name: Restore compiled third-party libraries cache
+        id: compiled-libs-cache
+        uses: actions/cache/restore@v4
         with:
           path: |
             ${{ env.LibrariesPath }}\*
             !${{ env.LibrariesPath }}\[qQ]t[_-]*
           key: ${{ runner.os }}-${{ runner.arch }}-ayugram-libs-v7.2.9-v1
 
-      - name: Cache built Qt
-        uses: actions/cache@v4
+      - name: Restore built Qt cache
+        id: qt-cache
+        uses: actions/cache/restore@v4
         with:
           path: ${{ env.LibrariesPath }}\[qQ]t[_-]*
           key: ${{ runner.os }}-${{ runner.arch }}-ayugram-qt6-v7.2.9-v1
@@ -119,6 +122,31 @@ jobs:
           Write-Host 'Replaced obsolete MINGW64 diffutils dependency with MSYS diffutils.'
           & (Join-Path $env:TBUILD 'tdesktop\Telegram\build\prepare\win.bat') silent
           if ($LASTEXITCODE -ne 0) { throw 'AyuGram Windows dependency build failed.' }
+
+      # Explicit saves are run before application compilation so a failed
+      # AyuGram C++ build does not discard expensive dependency/Qt builds.
+      - name: Save prepared third-party sources cache
+        if: steps.third-party-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.TBUILD }}\ThirdParty
+          key: ${{ steps.third-party-cache.outputs.cache-primary-key }}
+
+      - name: Save prepared compiled libraries cache
+        if: steps.compiled-libs-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\*
+            !${{ env.LibrariesPath }}\[qQ]t[_-]*
+          key: ${{ steps.compiled-libs-cache.outputs.cache-primary-key }}
+
+      - name: Save prepared Qt cache
+        if: steps.qt-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.LibrariesPath }}\[qQ]t[_-]*
+          key: ${{ steps.qt-cache.outputs.cache-primary-key }}
 
       - name: Configure and build Release
         run: |
