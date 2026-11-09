@@ -34,3 +34,27 @@ The full Windows build is gated by a short Windows preflight job that applies al
 ## CI policy
 
 Pushing to `main` runs **only** inexpensive Windows patch preflight checks, including an isolated MSVC syntax compile of the modified chat background for Windows and non-Windows paths. The costly full binary build normally runs **only** through **Actions > Transparent AyuGram - Windows x64 > Run workflow**. A one-off rebuild can also be triggered by a commit whose message includes `[run-full-build]`; ordinary pushes remain preflight-only. This deliberately prevents repeated multihour compilations after every fix. The syntax check is narrow and does not guarantee the complete application links or runs.
+
+## Translucent scroll and resize compositing
+
+For the Windows translucent build, scrollable list content cannot use the
+usual opaque backing-store optimizations. The transparency patch applies an
+alpha-safe painting policy to the shared `Ui::ScrollArea`: disables
+`WA_OpaquePaintEvent` and `WA_StaticContents` on its viewport and
+scrolling content and invalidates only the visible region after scrolling or
+resizing. It also disables the dialogs' temporary `RowsScrollCache` whenever
+the top-level window is translucent, because that cache uses
+`QImage::Format_RGB32` and loses the alpha channel.
+
+This change does not introduce per-widget Windhawk effects or new fixed
+palette opacities. It prioritizes correct glass rendering over the RGB32
+scroll cache optimization and may increase CPU use during continuous list
+scrolling. The window-level blur remains Windhawk's responsibility. Native
+Qt Widgets do not provide CSS `backdrop-filter` for sibling content; a
+true intra-window backdrop blur would require an explicit offscreen capture
+and blur compositor and is not implemented here.
+
+Run `scripts/preflight_glass_cpp.py` in the Windows Actions preflight to
+syntax-check the exact patched scroll methods with MSVC in both Windows and
+ordinary configurations. This does not replace a full integration build or
+visual testing.
