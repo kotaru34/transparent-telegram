@@ -29,6 +29,13 @@ jobs:
         with:
           python-version: '3.10'
 
+      - name: MSVC compiler for isolated C++ syntax checks
+        uses: Eden-CI/msvc-dev-cmd@master
+        with:
+          arch: x64
+          sdk: '10.0.26100.0'
+          toolset: '14.44'
+
       - name: Download only patched source files and validate all anchors
         run: |
           $root = Join-Path $env:RUNNER_TEMP 'ayugram-patch-preflight'
@@ -54,10 +61,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Transparency patch has invalid Python syntax.' }
           python scripts/apply_transparency.py --ayugram $root
           if ($LASTEXITCODE -ne 0) { throw 'Pinned AyuGram patch preflight failed. Expensive Windows compilation was not started.' }
-          Write-Host 'Pinned AyuGram source patches verified; the full build may proceed.'
+          # Compile the exact patched SectionWidget method in a small
+          # standalone C++ harness for both Windows and ordinary branches.
+          # This catches duplicate declarations and syntax errors before
+          # starting the multi-hour full build.
+          python scripts/preflight_cpp.py --ayugram $root
+          if ($LASTEXITCODE -ne 0) { throw 'Patched AyuGram C++ syntax preflight failed.' }
+          Write-Host 'Pinned AyuGram patch anchors and chat C++ syntax verified.'
 
   windows-x64:
     name: AyuGram Desktop 7.2.9 (Windows x64 / Qt5)
+    if: github.event_name == 'workflow_dispatch'
     runs-on: windows-2022
     timeout-minutes: 360
     needs: preflight

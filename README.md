@@ -30,3 +30,7 @@ Compiling third-party dependencies and Qt from source is resource-intensive. The
 ## CI resource safety
 
 The full Windows build is gated by a short Windows preflight job that applies all patches to the pinned upstream source files before dependency preparation. The build removes the upstream CMake `/MP` option and uses one MSBuild worker to prevent MSVC `C1060` heap exhaustion on standard GitHub-hosted Windows runners. This may increase build time but avoids uncontrolled compiler concurrency; dependency/Qt caches are preserved.
+
+## CI policy
+
+Pushing to `main` runs **only** inexpensive Windows patch preflight checks, including an isolated MSVC syntax compile of the modified chat background for Windows and non-Windows paths. The costly full binary build runs **only** through **Actions > Transparent AyuGram - Windows x64 > Run workflow**. This deliberately prevents repeated multihour compilations after every fix. The syntax check is narrow and does not guarantee the complete application links or runs.
