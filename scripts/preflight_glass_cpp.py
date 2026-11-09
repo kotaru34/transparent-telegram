@@ -17,7 +17,8 @@ def extract(source: str, signature: str) -> str:
     start = source.find(signature)
     if start < 0 or source.find(signature, start + 1) >= 0:
         raise RuntimeError(f"Expected exactly one {signature!r}")
-    opened = source.find("{", start + len(signature))
+    # Signatures end with "{": include that brace in the balanced scan.
+    opened = start + len(signature) - 1 if signature.endswith("{") else source.find("{", start + len(signature))
     if opened < 0:
         raise RuntimeError(f"Missing body for {signature!r}")
     depth = 0
