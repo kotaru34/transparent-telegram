@@ -45,7 +45,8 @@ jobs:
             @{ base = $ayuBase; path = 'Telegram/SourceFiles/window/main_window.cpp' },
             @{ base = $ayuBase; path = 'Telegram/SourceFiles/mainwindow.cpp' },
             @{ base = $ayuBase; path = 'Telegram/SourceFiles/window/section_widget.cpp' },
-            @{ base = $ayuBase; path = 'Telegram/SourceFiles/window/window_main_menu.cpp' },
+            @{ base = $ayuBase; path = 'Telegram/SourceFiles/window/window_main_menu.cpp' }
+            @{ base = $ayuBase; path = 'Telegram/SourceFiles/dialogs/dialogs_inner_widget.cpp' },
             @{ base = $uiBase; path = 'Telegram/lib_ui/ui/colors.palette'; source = 'ui/colors.palette' },
             @{ base = $uiBase; path = 'Telegram/lib_ui/ui/style/style_core_palette.h'; source = 'ui/style/style_core_palette.h' },
             @{ base = $uiBase; path = 'Telegram/lib_ui/ui/style/style_core_palette.cpp'; source = 'ui/style/style_core_palette.cpp' },
@@ -67,6 +68,8 @@ jobs:
           # starting the multi-hour full build.
           python scripts/preflight_cpp.py --ayugram $root
           if ($LASTEXITCODE -ne 0) { throw 'Patched AyuGram C++ syntax preflight failed.' }
+          python scripts/preflight_glass_cpp.py --ayugram $root
+          if ($LASTEXITCODE -ne 0) { throw 'Glass scroll C++ syntax preflight failed.' }
           Write-Host 'Pinned AyuGram patch anchors and chat C++ syntax verified.'
 
   windows-x64:

@@ -112,23 +112,139 @@ def patch_main_menu(root: Path) -> None:
 
 
 def patch_scroll(root: Path) -> None:
-    patch_one(
-        root / "Telegram/lib_ui/ui/widgets/scroll_area.cpp",
-        "\tQScrollArea::scrollContentsBy(dx, dy);\n}",
-        """\tQScrollArea::scrollContentsBy(dx, dy);
+    path = root / "Telegram/lib_ui/ui/widgets/scroll_area.cpp"
+    source = path.read_text(encoding="utf-8")
+    if MARK in source:
+        print("Already patched:", path)
+        return
+
+    def replace(before: str, after: str) -> None:
+        nonlocal source
+        count = source.count(before)
+        if count != 1:
+            raise RuntimeError(
+                f"{path}: glass scroll anchor mismatch (expected 1, found {count}): {before[:65]!r}"
+            )
+        source = source.replace(before, after, 1)
+
+    replace(
+        "namespace Ui {\nnamespace {\n\n[[nodiscard]] int ComputeScrollTo(",
+        """namespace Ui {
+namespace {
+
 #ifdef Q_OS_WIN
-\t// Transparent AyuGram: Qt's scroll-copy optimization can retain
-\t// old translucent rows in the backing store. Invalidate the visible
-\t// content and viewport after moving the scrollable widget.
-\tif (window()->testAttribute(Qt::WA_TranslucentBackground)) {
-\t\tif (auto content = widget()) {
-\t\t\tcontent->update();
+// Transparent AyuGram: apply once at attachment and again before scroll
+// or resize, since some widgets change painting hints after construction.
+[[nodiscard]] bool PrepareGlassScroll(QScrollArea *area) {
+\tif (!area->window()->testAttribute(Qt::WA_TranslucentBackground)) {
+\t\treturn false;
+\t}
+\tconst auto disableOpaqueOptimization = [](QWidget *widget) {
+\t\tif (widget) {
+\t\t\twidget->setAttribute(Qt::WA_OpaquePaintEvent, false);
+\t\t\twidget->setAttribute(Qt::WA_StaticContents, false);
 \t\t}
-\t\tviewport()->update();
+\t};
+\tdisableOpaqueOptimization(area->viewport());
+\tdisableOpaqueOptimization(area->widget());
+\treturn true;
+}
+
+// Do not repaint an entire potentially huge chat list: update only the
+// region visible through the viewport in the content's coordinates.
+void RepaintGlassScroll(QScrollArea *area) {
+\tif (const auto content = area->widget()) {
+\t\tconst auto visible = area->viewport()->rect()
+\t\t\t.translated(-content->pos())
+\t\t\t.intersected(content->rect());
+\t\tif (!visible.isEmpty()) {
+\t\t\tcontent->update(visible);
+\t\t}
+\t}
+\tarea->viewport()->update();
+}
+#endif // Q_OS_WIN
+
+[[nodiscard]] int ComputeScrollTo(""",
+    )
+    replace(
+        "\tQScrollArea::scrollContentsBy(dx, dy);\n}",
+        """#ifdef Q_OS_WIN
+\tconst auto glass = PrepareGlassScroll(this);
+#endif
+\tQScrollArea::scrollContentsBy(dx, dy);
+#ifdef Q_OS_WIN
+\tif (glass) {
+\t\tRepaintGlassScroll(this);
 \t}
 #endif
 }""",
     )
+    replace(
+        """void ScrollArea::resizeEvent(QResizeEvent *e) {
+\tQScrollArea::resizeEvent(e);""",
+        """void ScrollArea::resizeEvent(QResizeEvent *e) {
+#ifdef Q_OS_WIN
+\tconst auto glass = PrepareGlassScroll(this);
+#endif
+\tQScrollArea::resizeEvent(e);
+#ifdef Q_OS_WIN
+\tif (glass) {
+\t\tRepaintGlassScroll(this);
+\t}
+#endif""",
+    )
+    replace(
+        "\tQScrollArea::setWidget(_widget);\n\tif (_widget) {",
+        """\tQScrollArea::setWidget(_widget);
+#ifdef Q_OS_WIN
+\tPrepareGlassScroll(this);
+#endif
+\tif (_widget) {""",
+    )
+    path.write_text(source, encoding="utf-8", newline="\n")
+    print("Patched:", path)
+
+
+def patch_dialogs(root: Path) -> None:
+    path = root / "Telegram/SourceFiles/dialogs/dialogs_inner_widget.cpp"
+    source = path.read_text(encoding="utf-8")
+    if MARK in source:
+        print("Already patched:", path)
+        return
+
+    replacements = [
+        (
+            "\tsetAttribute(Qt::WA_OpaquePaintEvent, true);\n\tsetAccessibleName(",
+            """#ifdef Q_OS_WIN
+\t// Transparent AyuGram: rows are semi-transparent, not opaque.
+\tsetAttribute(Qt::WA_OpaquePaintEvent, false);
+#else
+\tsetAttribute(Qt::WA_OpaquePaintEvent, true);
+#endif
+\tsetAccessibleName(""",
+        ),
+        (
+            "\t\tconst auto cacheAllowed = _rowsScrollCache.scrolling()\n"
+            "\t\t\t&& (!videoUserpic || !context.narrow)",
+            """\t\tconst auto cacheAllowed = _rowsScrollCache.scrolling()
+#ifdef Q_OS_WIN
+\t\t\t// RowsScrollCache uses QImage::Format_RGB32 (no alpha);
+\t\t\t// never composite it into our translucent window.
+\t\t\t&& !window()->testAttribute(Qt::WA_TranslucentBackground)
+#endif
+\t\t\t&& (!videoUserpic || !context.narrow)""",
+        ),
+    ]
+    for before, after in replacements:
+        count = source.count(before)
+        if count != 1:
+            raise RuntimeError(
+                f"{path}: dialogs anchor mismatch (expected 1, found {count}): {before[:70]!r}"
+            )
+        source = source.replace(before, after, 1)
+    path.write_text(source, encoding="utf-8", newline="\n")
+    print("Patched:", path)
 
 
 def patch_palette(root: Path) -> None:
@@ -258,6 +374,7 @@ def main() -> None:
     patch_chat(root)
     patch_main_menu(root)
     patch_scroll(root)
+    patch_dialogs(root)
     patch_palette(root)
     print("Transparent AyuGram: all patches applied")
 
