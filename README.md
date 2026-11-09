@@ -33,4 +33,4 @@ The full Windows build is gated by a short Windows preflight job that applies al
 
 ## CI policy
 
-Pushing to `main` runs **only** inexpensive Windows patch preflight checks, including an isolated MSVC syntax compile of the modified chat background for Windows and non-Windows paths. The costly full binary build runs **only** through **Actions > Transparent AyuGram - Windows x64 > Run workflow**. This deliberately prevents repeated multihour compilations after every fix. The syntax check is narrow and does not guarantee the complete application links or runs.
+Pushing to `main` runs **only** inexpensive Windows patch preflight checks, including an isolated MSVC syntax compile of the modified chat background for Windows and non-Windows paths. The costly full binary build normally runs **only** through **Actions > Transparent AyuGram - Windows x64 > Run workflow**. A one-off rebuild can also be triggered by a commit whose message includes `[run-full-build]`; ordinary pushes remain preflight-only. This deliberately prevents repeated multihour compilations after every fix. The syntax check is narrow and does not guarantee the complete application links or runs.
