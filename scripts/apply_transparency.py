@@ -62,9 +62,9 @@ def patch_chat(root: Path) -> None:
 \tif (glass.alpha() == 0) {
 \t\tglass.setAlpha(1);
 \t}
-\tauto p = QPainter(widget);
-\tp.setCompositionMode(QPainter::CompositionMode_Source);
-\tp.fillRect(clip, glass);
+\tauto glassPainter = QPainter(widget);
+\tglassPainter.setCompositionMode(QPainter::CompositionMode_Source);
+\tglassPainter.fillRect(clip, glass);
 \treturn;
 #endif
 \tauto p = QPainter(widget);""",
