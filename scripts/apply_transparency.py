@@ -521,6 +521,216 @@ def patch_popup_menu(root: Path) -> None:
     ])
 
 
+def patch_hover_emoji_panel(root: Path) -> None:
+    """Replace stale pixels when Emoji/Stickers/GIFs redraw small hover regions.
+
+    AyuGram's floating TabbedPanel previews use an ARGB cached frame, while
+    the live inner widgets previously used opaque-paint hints or SourceOver
+    semi-transparent fills. That can retain old chat pixels or partially
+    composited tiles when hover/scroll/resize updates only a dirty rectangle.
+    These changes are active only for translucent top-level Windows windows.
+    """
+    helper = root / "Telegram/SourceFiles/chat_helpers"
+
+    def patch_many(path: Path, replacements: list[tuple[str, str]]) -> None:
+        source = path.read_text(encoding="utf-8")
+        if "Transparent AyuGram: picker repaint" in source:
+            print("Already patched:", path)
+            return
+        for before, after in replacements:
+            count = source.count(before)
+            if count != 1:
+                raise RuntimeError(
+                    f"{path}: emoji picker anchor mismatch ({count}): {before[:90]!r}"
+                )
+            source = source.replace(before, after, 1)
+        path.write_text(source, encoding="utf-8", newline="\n")
+        print("Patched:", path)
+
+    patch_many(helper / "tabbed_selector.cpp", [
+        (
+            "\tsetAttribute(Qt::WA_OpaquePaintEvent, false);\n"
+            "\tshowAll();",
+            """\tsetAttribute(Qt::WA_OpaquePaintEvent, false);
+#ifdef Q_OS_WIN
+\t// Transparent AyuGram: picker repaint after partially dirty updates.
+\t// Do not copy obsolete backing-store pixels after scroll or resize.
+\tif (window()->testAttribute(Qt::WA_TranslucentBackground)) {
+\t\tsetAttribute(Qt::WA_StaticContents, false);
+\t}
+#endif
+\tshowAll();""",
+        ),
+        (
+            "void TabbedSelector::paintEvent(QPaintEvent *e) {\n"
+            "\tauto p = QPainter(this);\n",
+            """void TabbedSelector::paintEvent(QPaintEvent *e) {
+\tauto p = QPainter(this);
+#ifdef Q_OS_WIN
+\t// Transparent AyuGram: picker repaint. Give the selector a consistent
+\t// alpha-safe base, even when only a hover/scroll rectangle is repainted.
+\tif (window()->testAttribute(Qt::WA_TranslucentBackground)) {
+\t\tp.setCompositionMode(QPainter::CompositionMode_Source);
+\t\tp.fillRect(e->rect(), _st.bg);
+\t\tp.setCompositionMode(QPainter::CompositionMode_SourceOver);
+\t}
+#endif
+""",
+        ),
+    ])
+    patch_many(helper / "emoji_list_widget.cpp", [
+        (
+            "\tif (st().bg->c.alpha() > 0) {\n"
+            "\t\tsetAttribute(Qt::WA_OpaquePaintEvent);\n"
+            "\t}\n",
+            """#ifdef Q_OS_WIN
+\t// Transparent AyuGram: picker repaint. A translucent background is
+\t// not an opaque Qt paint surface, even when its alpha is nonzero.
+\tif (window()->testAttribute(Qt::WA_TranslucentBackground)) {
+\t\tsetAttribute(Qt::WA_OpaquePaintEvent, false);
+\t\tsetAttribute(Qt::WA_StaticContents, false);
+\t} else if (st().bg->c.alpha() == 255) {
+\t\tsetAttribute(Qt::WA_OpaquePaintEvent);
+\t}
+#else
+\tif (st().bg->c.alpha() > 0) {
+\t\tsetAttribute(Qt::WA_OpaquePaintEvent);
+\t}
+#endif
+""",
+        ),
+        (
+            "\t} else if (st().bg->c.alpha() > 0) {\n"
+            "\t\tp.fillRect(clip, st().bg);\n"
+            "\t}\n"
+            "\tif (!_searchExpandCache.isNull()) {",
+            """\t} else if (st().bg->c.alpha() > 0) {
+#ifdef Q_OS_WIN
+\t\t// Transparent AyuGram: picker repaint. Discard prior transparent
+\t\t// backing-store content before rendering an updated emoji cell.
+\t\tif (window()->testAttribute(Qt::WA_TranslucentBackground)) {
+\t\t\tp.setCompositionMode(QPainter::CompositionMode_Source);
+\t\t}
+#endif
+\t\tp.fillRect(clip, st().bg);
+#ifdef Q_OS_WIN
+\t\tp.setCompositionMode(QPainter::CompositionMode_SourceOver);
+#endif
+\t}
+\tif (!_searchExpandCache.isNull()) {""",
+        ),
+    ])
+    patch_many(helper / "stickers_list_widget.cpp", [
+        (
+            "\tif (st().bg->c.alpha() > 0) {\n"
+            "\t\tsetAttribute(Qt::WA_OpaquePaintEvent);\n"
+            "\t}\n",
+            """#ifdef Q_OS_WIN
+\t// Transparent AyuGram: picker repaint; no opaque scroll optimizations.
+\tif (window()->testAttribute(Qt::WA_TranslucentBackground)) {
+\t\tsetAttribute(Qt::WA_OpaquePaintEvent, false);
+\t\tsetAttribute(Qt::WA_StaticContents, false);
+\t} else if (st().bg->c.alpha() == 255) {
+\t\tsetAttribute(Qt::WA_OpaquePaintEvent);
+\t}
+#else
+\tif (st().bg->c.alpha() > 0) {
+\t\tsetAttribute(Qt::WA_OpaquePaintEvent);
+\t}
+#endif
+""",
+        ),
+        (
+            "void StickersListWidget::paintEvent(QPaintEvent *e) {\n"
+            "\tPainter p(this);\n"
+            "\tauto clip = e->rect();\n"
+            "\tif (st().bg->c.alpha() > 0) {\n"
+            "\t\tp.fillRect(clip, st().bg);\n"
+            "\t}\n",
+            """void StickersListWidget::paintEvent(QPaintEvent *e) {
+\tPainter p(this);
+\tauto clip = e->rect();
+\tif (st().bg->c.alpha() > 0) {
+#ifdef Q_OS_WIN
+\t\t// Transparent AyuGram: picker repaint. Replace every dirty pixel
+\t\t// including portions covered by old animated sticker previews.
+\t\tif (window()->testAttribute(Qt::WA_TranslucentBackground)) {
+\t\t\tp.setCompositionMode(QPainter::CompositionMode_Source);
+\t\t}
+#endif
+\t\tp.fillRect(clip, st().bg);
+#ifdef Q_OS_WIN
+\t\tp.setCompositionMode(QPainter::CompositionMode_SourceOver);
+#endif
+\t}
+""",
+        ),
+    ])
+    patch_many(helper / "gifs_list_widget.cpp", [
+        (
+            "\tsetMouseTracking(true);\n"
+            "\tsetAttribute(Qt::WA_OpaquePaintEvent);\n"
+            "\n\tsetupSearch();",
+            """\tsetMouseTracking(true);
+#ifdef Q_OS_WIN
+\t// Transparent AyuGram: picker repaint. GIF previews can update only
+\t// small tiles, so opaque backing-store flags cause old image trails.
+\tif (window()->testAttribute(Qt::WA_TranslucentBackground)) {
+\t\tsetAttribute(Qt::WA_OpaquePaintEvent, false);
+\t\tsetAttribute(Qt::WA_StaticContents, false);
+\t} else {
+\t\tsetAttribute(Qt::WA_OpaquePaintEvent);
+\t}
+#else
+\tsetAttribute(Qt::WA_OpaquePaintEvent);
+#endif
+
+\tsetupSearch();""",
+        ),
+        (
+            "void GifsListWidget::paintEvent(QPaintEvent *e) {\n"
+            "\tPainter p(this);\n"
+            "\tauto clip = e->rect();\n"
+            "\tp.fillRect(clip, st().bg);\n",
+            """void GifsListWidget::paintEvent(QPaintEvent *e) {
+\tPainter p(this);
+\tauto clip = e->rect();
+#ifdef Q_OS_WIN
+\t// Transparent AyuGram: picker repaint, including single GIF frames.
+\tif (window()->testAttribute(Qt::WA_TranslucentBackground)) {
+\t\tp.setCompositionMode(QPainter::CompositionMode_Source);
+\t}
+#endif
+\tp.fillRect(clip, st().bg);
+#ifdef Q_OS_WIN
+\tp.setCompositionMode(QPainter::CompositionMode_SourceOver);
+#endif
+""",
+        ),
+    ])
+    patch_many(helper / "tabbed_panel.cpp", [
+        (
+            "\t\t\tshowChildren();\n"
+            "\t\t\t_selector->afterShown();\n"
+            "\t\t}\n"
+            "\t}\n"
+            "\tif (showAnimating) {",
+            """\t\t\tshowChildren();
+\t\t\t_selector->afterShown();
+#ifdef Q_OS_WIN
+\t\t\t// Transparent AyuGram: picker repaint when the cached opening
+\t\t\t// animation hands over to live child widgets.
+\t\t\tif (window()->testAttribute(Qt::WA_TranslucentBackground)) {
+\t\t\t\t_selector->update();
+\t\t\t}
+#endif
+\t\t}
+\t}
+\tif (showAnimating) {""",
+        ),
+    ])
+
+
 def patch_palette(root: Path) -> None:
     header = root / "Telegram/lib_ui/ui/style/style_core_palette.h"
     patch_one(
@@ -653,6 +863,7 @@ def main() -> None:
     patch_peer_lists(root)
     patch_info_content(root)
     patch_popup_menu(root)
+    patch_hover_emoji_panel(root)
     patch_palette(root)
     print("Transparent AyuGram: all patches applied")
 

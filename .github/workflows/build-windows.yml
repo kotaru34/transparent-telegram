@@ -48,7 +48,12 @@ jobs:
             @{ base = $ayuBase; path = 'Telegram/SourceFiles/window/window_main_menu.cpp' }
             @{ base = $ayuBase; path = 'Telegram/SourceFiles/dialogs/dialogs_inner_widget.cpp' }
             @{ base = $ayuBase; path = 'Telegram/SourceFiles/boxes/peer_list_box.cpp' }
-            @{ base = $ayuBase; path = 'Telegram/SourceFiles/info/info_content_widget.cpp' },
+            @{ base = $ayuBase; path = 'Telegram/SourceFiles/info/info_content_widget.cpp' }
+            @{ base = $ayuBase; path = 'Telegram/SourceFiles/chat_helpers/tabbed_panel.cpp' }
+            @{ base = $ayuBase; path = 'Telegram/SourceFiles/chat_helpers/tabbed_selector.cpp' }
+            @{ base = $ayuBase; path = 'Telegram/SourceFiles/chat_helpers/emoji_list_widget.cpp' }
+            @{ base = $ayuBase; path = 'Telegram/SourceFiles/chat_helpers/stickers_list_widget.cpp' }
+            @{ base = $ayuBase; path = 'Telegram/SourceFiles/chat_helpers/gifs_list_widget.cpp' },
             @{ base = $uiBase; path = 'Telegram/lib_ui/ui/colors.palette'; source = 'ui/colors.palette' },
             @{ base = $uiBase; path = 'Telegram/lib_ui/ui/style/style_core_palette.h'; source = 'ui/style/style_core_palette.h' },
             @{ base = $uiBase; path = 'Telegram/lib_ui/ui/style/style_core_palette.cpp'; source = 'ui/style/style_core_palette.cpp' },
@@ -80,6 +85,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Internal Qt backdrop blur validation failed.' }
           python scripts/preflight_popup_cpp.py --ayugram $root
           if ($LASTEXITCODE -ne 0) { throw 'Popup menu compositor validation failed.' }
+          python scripts/preflight_emoji_picker.py --ayugram $root
+          if ($LASTEXITCODE -ne 0) { throw 'Emoji/GIF/sticker glass painter preflight failed.' }
           Write-Host 'Pinned AyuGram patch anchors and chat C++ syntax verified.'
 
   windows-x64:
