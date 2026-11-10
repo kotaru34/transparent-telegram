@@ -14,10 +14,10 @@ import tempfile
 
 
 FILES = {
-    "tabbed_selector.cpp": ["void TabbedSelector::paintEvent(QPaintEvent *e) {", "TabbedSelector::TabbedSelector("],
-    "emoji_list_widget.cpp": ["void EmojiListWidget::paintEvent(QPaintEvent *e) {", "EmojiListWidget::EmojiListWidget("],
-    "stickers_list_widget.cpp": ["void StickersListWidget::paintEvent(QPaintEvent *e) {", "StickersListWidget::StickersListWidget("],
-    "gifs_list_widget.cpp": ["void GifsListWidget::paintEvent(QPaintEvent *e) {", "GifsListWidget::GifsListWidget("],
+    "tabbed_selector.cpp": ["void TabbedSelector::paintEvent(QPaintEvent *e) {"],
+    "emoji_list_widget.cpp": ["void EmojiListWidget::paintEvent(QPaintEvent *e) {"],
+    "stickers_list_widget.cpp": ["void StickersListWidget::paintEvent(QPaintEvent *e) {"],
+    "gifs_list_widget.cpp": ["void GifsListWidget::paintEvent(QPaintEvent *e) {"],
     "tabbed_panel.cpp": ["void TabbedPanel::paintEvent(QPaintEvent *e) {"],
 }
 
