@@ -459,6 +459,17 @@ def patch_popup_menu(root: Path) -> None:
 #endif""",
         ),
         (
+            "\t\t\tPlatform::AcceptAllMouseInput(this);\n"
+            "\t\t});",
+            """\t\t\tPlatform::AcceptAllMouseInput(this);
+#ifdef Q_OS_WIN
+\t\t\t// Transparent AyuGram: force first live popup repaint just
+\t\t\t// after the cached opening animation is discarded.
+\t\t\tupdate();
+#endif
+\t\t});""",
+        ),
+        (
             "void PopupMenu::paintBg(QPainter &p) {\n"
             "\tif (!_useTransparency) {",
             """void PopupMenu::paintBg(QPainter &p) {
