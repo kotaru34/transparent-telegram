@@ -714,6 +714,7 @@ def patch_hover_emoji_panel(root: Path) -> None:
             "\t\t\t_selector->afterShown();\n"
             "\t\t}\n"
             "\t}\n"
+            "\n"
             "\tif (showAnimating) {",
             """\t\t\tshowChildren();
 \t\t\t_selector->afterShown();
