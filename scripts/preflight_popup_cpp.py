@@ -88,8 +88,10 @@ def main() -> None:
             raise RuntimeError(f"Popup policy occurrence mismatch: {needle}: {count}")
     if menu.count('property("ayugramGlassPopupAlphaFill").toBool()') != 1:
         raise RuntimeError("Nested menu missing child alpha-safe background painter")
-    if popup.count("_roundRect.setColor(st::windowFg);") != 1:
-        raise RuntimeError("DestinationIn corner mask still uses translucent themed alpha")
+    mask_line = "static const auto kOpaqueRoundingMask = style::owned_color(QColor(255, 255, 255, 255));"
+    mask_setter = "_roundRect.setColor(kOpaqueRoundingMask.color());"
+    if popup.count(mask_line) != 1 or popup.count(mask_setter) != 1:
+        raise RuntimeError("DestinationIn corner mask must use a persistent opaque style::owned_color")
     if popup.count("p.setCompositionMode(QPainter::CompositionMode_Source);") != 2:
         raise RuntimeError("Popup root and padding must each use Source compositing")
     if menu.count("p.setCompositionMode(QPainter::CompositionMode_Source);") != 1:
@@ -115,6 +117,50 @@ def main() -> None:
                 print(result.stderr)
             if result.returncode:
                 raise RuntimeError(f"{platform} popup background C++ check failed")
+        # Verify the exact corner-mask statements with type-shaped stubs.
+        # This catches unknown st:: palette symbols without building Qt.
+        mask_begin = popup.index(mask_line)
+        mask_end = popup.index("\n#endif", mask_begin)
+        if mask_end < 0:
+            raise RuntimeError("Missing Windows corner-mask block terminator")
+        mask_source = popup[mask_begin:mask_end]
+        mask_stub = r"""
+struct QColor { QColor(int, int, int, int) {} };
+namespace style {
+struct color {};
+class owned_color {
+public:
+    explicit owned_color(const QColor&) {}
+    const style::color& color() const {
+        static const style::color value;
+        return value;
+    }
+};
+}
+struct RoundRect { void setColor(const style::color&) {} };
+struct PopupMaskHarness {
+    RoundRect _roundRect;
+    void applyMask();
+};
+"""
+        mask_path = Path(tmp) / "popup_mask.cpp"
+        mask_path.write_text(
+            mask_stub + "\nvoid PopupMaskHarness::applyMask() {\n"
+            + mask_source + "\n}\n",
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            ["cl.exe", "/nologo", "/std:c++17", "/Zs", str(mask_path)],
+            capture_output=True, text=True,
+        )
+        print(f"Windows opaque corner-mask MSVC syntax: "
+              f"{'PASS' if result.returncode == 0 else 'FAIL'}")
+        if result.stdout:
+            print(result.stdout)
+        if result.stderr:
+            print(result.stderr)
+        if result.returncode:
+            raise RuntimeError("Corner-mask C++ syntax check failed")
     print("Popup root, padding, child painter and opaque corner-mask policy: PASS")
 
 
