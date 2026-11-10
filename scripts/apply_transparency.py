@@ -418,16 +418,15 @@ def patch_info_content(root: Path) -> None:
 def patch_popup_menu(root: Path) -> None:
     """Keep the themed backdrop visible after popup opening animations end.
 
-    The transition frame contains a background painted into a cached image,
-    but live PopupMenu::paintBg() normally paints *only* the fallback shadow.
-    On Windows layered windows the live backdrop can disappear when the
-    cached frame is discarded and child widgets are shown. The popup root
-    now owns the single backdrop; the child Menu skips its duplicate fill.
+    The initial animation contains a cached backdrop; after the animation,
+    the parent and each clipped child widget need to paint a stable alpha
+    surface. A DestinationIn mask must also be fully opaque inside its path.
+    Qt's backing-store can clip away parent pixels covered by its children.
     """
     popup = root / "Telegram/lib_ui/ui/widgets/popup_menu.cpp"
     menu = root / "Telegram/lib_ui/ui/widgets/menu/menu.cpp"
-    if "ayugramGlassPopupRootPaint" in popup.read_text(encoding="utf-8"):
-        if "ayugramGlassPopupRootPaint" not in menu.read_text(encoding="utf-8"):
+    if "ayugramGlassPopupAlphaFill" in popup.read_text(encoding="utf-8"):
+        if "ayugramGlassPopupAlphaFill" not in menu.read_text(encoding="utf-8"):
             raise RuntimeError("Partial popup menu patch: missing child painter update")
         print("Already patched:", popup, menu)
         return
@@ -453,9 +452,12 @@ def patch_popup_menu(root: Path) -> None:
 \tif (_useTransparency) {
 \t\tsetAttribute(Qt::WA_TranslucentBackground, true);
 #ifdef Q_OS_WIN
-\t\t// Transparent AyuGram: native popup owns its live background,
-\t\t// including after the initial cached show animation is gone.
-\t\t_menu->setProperty("ayugramGlassPopupRootPaint", true);
+\t\t// Transparent AyuGram: the popup has one themed translucent color
+\t\t// but its parent and child widgets must paint their own clipped regions.
+\t\t_menu->setProperty("ayugramGlassPopupAlphaFill", true);
+\t\t// The DestinationIn corner mask must be alpha=255 inside the
+\t\t// rounded shape: using menuBg alpha repeatedly erodes the menu.
+\t\t_roundRect.setColor(st::windowFg);
 #endif""",
         ),
         (
@@ -487,19 +489,17 @@ def patch_popup_menu(root: Path) -> None:
 \tif (!_useTransparency) {""",
         ),
         (
-            "\tpaddingWrap->paintRequest(\n"
-            "\t) | rpl::on_next([=](QRect clip) {\n"
-            "\t\tconst auto top = clip.intersected(",
-            """\tpaddingWrap->paintRequest(
-\t) | rpl::on_next([=](QRect clip) {
+            "\t\tauto p = QPainter(paddingWrap);\n"
+            "\t\tif (!top.isEmpty()) {",
+            """\t\tauto p = QPainter(paddingWrap);
 #ifdef Q_OS_WIN
-\t\t// The live popup root paints the whole backdrop and padding.
-\t\t// Duplicate translucent fills would make these edges darker.
-\t\tif (_menu->property("ayugramGlassPopupRootPaint").toBool()) {
-\t\t\treturn;
+\t\t// Transparent AyuGram: Qt can clip the parent behind child widgets.
+\t\t// The padding must replace its own pixels after the popup animation.
+\t\tif (_menu->property("ayugramGlassPopupAlphaFill").toBool()) {
+\t\t\tp.setCompositionMode(QPainter::CompositionMode_Source);
 \t\t}
 #endif
-\t\tconst auto top = clip.intersected(""",
+\t\tif (!top.isEmpty()) {""",
         ),
     ])
     apply(menu, [
@@ -510,9 +510,12 @@ def patch_popup_menu(root: Path) -> None:
             """\tpaintRequest(
 \t) | rpl::on_next([=](const QRect &clip) {
 #ifdef Q_OS_WIN
-\t\t// Transparent AyuGram: the PopupMenu top-level paints this
-\t\t// background in its own backing store after animation ends.
-\t\tif (property("ayugramGlassPopupRootPaint").toBool()) {
+\t\tif (property("ayugramGlassPopupAlphaFill").toBool()) {
+\t\t\t// Transparent AyuGram: the child menu paints its own region.
+\t\t\t// Root QWidget painting is clipped behind this child.
+\t\t\tauto p = QPainter(this);
+\t\t\tp.setCompositionMode(QPainter::CompositionMode_Source);
+\t\t\tp.fillRect(clip, _st.itemBg);
 \t\t\treturn;
 \t\t}
 #endif
@@ -576,6 +579,30 @@ def patch_hover_emoji_panel(root: Path) -> None:
 \t}
 #endif
 """,
+        ),
+        (
+            "\t\t\t\tif (!_slideAnimation) {\n"
+            "\t\t\t\t\tafterShown();\n"
+            "\t\t\t\t\t_slideFinished.fire({});",
+            """\t\t\t\tif (!_slideAnimation) {
+\t\t\t\t\tafterShown();
+#ifdef Q_OS_WIN
+\t\t\t\t\t// Transparent AyuGram: the final cached slide frame is not
+\t\t\t\t\t// necessarily replaced by the live grid until another event.
+\t\t\t\t\t// Schedule exactly one full visible-region repaint after the
+\t\t\t\t\t// animation, outside paintEvent (InvokeQueued callback).
+\t\t\t\t\tif (window()->testAttribute(Qt::WA_TranslucentBackground)) {
+\t\t\t\t\t\tupdate();
+\t\t\t\t\t\t_scroll->viewport()->update();
+\t\t\t\t\t\tif (const auto content = _scroll->widget()) {
+\t\t\t\t\t\t\tconst auto visible = _scroll->viewport()->rect()
+\t\t\t\t\t\t\t\t.translated(-content->pos())
+\t\t\t\t\t\t\t\t.intersected(content->rect());
+\t\t\t\t\t\t\tcontent->update(visible);
+\t\t\t\t\t\t}
+\t\t\t\t\t}
+#endif
+\t\t\t\t\t_slideFinished.fire({});""",
         ),
     ])
     patch_many(helper / "emoji_list_widget.cpp", [

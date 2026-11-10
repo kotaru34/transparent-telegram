@@ -75,8 +75,8 @@ def main() -> None:
     popup = (root / "popup_menu.cpp").read_text(encoding="utf-8")
     menu = (root / "menu/menu.cpp").read_text(encoding="utf-8")
     required = [
-        '_menu->setProperty("ayugramGlassPopupRootPaint", true);',
-        '_menu->property("ayugramGlassPopupRootPaint").toBool()',
+        '_menu->setProperty("ayugramGlassPopupAlphaFill", true);',
+        '_menu->property("ayugramGlassPopupAlphaFill").toBool()',
         'p.fillRect(_inner, _st.menu.itemBg);',
         'p.fillRect(rect(), Qt::transparent);',
         'p.setCompositionMode(QPainter::CompositionMode_Source);',
@@ -86,8 +86,18 @@ def main() -> None:
         expected = 2 if needle == "p.fillRect(_inner, _st.menu.itemBg);" else 1
         if count != expected:
             raise RuntimeError(f"Popup policy occurrence mismatch: {needle}: {count}")
-    if menu.count('property("ayugramGlassPopupRootPaint").toBool()') != 1:
-        raise RuntimeError("Nested menu duplicates the root translucent background")
+    if menu.count('property("ayugramGlassPopupAlphaFill").toBool()') != 1:
+        raise RuntimeError("Nested menu missing child alpha-safe background painter")
+    if popup.count("_roundRect.setColor(st::windowFg);") != 1:
+        raise RuntimeError("DestinationIn corner mask still uses translucent themed alpha")
+    if popup.count("p.setCompositionMode(QPainter::CompositionMode_Source);") != 2:
+        raise RuntimeError("Popup root and padding must each use Source compositing")
+    if menu.count("p.setCompositionMode(QPainter::CompositionMode_Source);") != 1:
+        raise RuntimeError("Live Menu child must use Source compositing")
+    if 'p.fillRect(clip, _st.itemBg);' not in menu:
+        raise RuntimeError("Live Menu child must repaint its own background")
+    if "if (_menu->property(\"ayugramGlassPopupAlphaFill\").toBool()) {\n\t\t\treturn;" in popup:
+        raise RuntimeError("The padding child remains disabled in glass mode")
     method = extract(popup, "void PopupMenu::paintBg(QPainter &p) {")
     with tempfile.TemporaryDirectory(prefix="ayugram-popup-preflight-") as tmp:
         path = Path(tmp) / "popup_paint.cpp"
@@ -105,7 +115,7 @@ def main() -> None:
                 print(result.stderr)
             if result.returncode:
                 raise RuntimeError(f"{platform} popup background C++ check failed")
-    print("Popup background root/child ownership policy: PASS")
+    print("Popup root, padding, child painter and opaque corner-mask policy: PASS")
 
 
 if __name__ == "__main__":
