@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+"""Fast MSVC syntax check for live popup background painting and policy.
+
+The real patched PopupMenu::paintBg method is checked in isolation with
+shape-compatible Qt stand-ins, without rebuilding AyuGram dependencies.
+Also checks that both popup and embedded menu painters agree on which
+widget owns the translucent background. Not a full Qt integration test.
+"""
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+import subprocess
+import tempfile
+
+
+def extract(source: str, signature: str) -> str:
+    start = source.find(signature)
+    if start < 0 or source.find(signature, start + 1) >= 0:
+        raise RuntimeError(f"Expected exactly one {signature}")
+    begin = source.find("{", start + len(signature))
+    if begin < 0:
+        raise RuntimeError("Missing body")
+    depth = 0
+    for at in range(begin, len(source)):
+        if source[at] == "{":
+            depth += 1
+        if source[at] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start:at + 1]
+    raise RuntimeError("Unbalanced C++ braces")
+
+
+STUB = r"""
+namespace Qt { constexpr int transparent = 0; }
+struct QRect {};
+struct QMargins {
+    int left() const { return 1; }
+    int right() const { return 1; }
+    int top() const { return 1; }
+    int bottom() const { return 1; }
+};
+struct QPainter {
+    enum CompositionMode {
+        CompositionMode_Source,
+        CompositionMode_SourceOver,
+    };
+    void setCompositionMode(CompositionMode) {}
+    template <class... Args> void fillRect(Args...) {}
+};
+struct ColorSet { int itemBg = 0; };
+struct Style {
+    ColorSet menu;
+    int shadowFallback = 0;
+};
+class PopupMenu {
+public:
+    bool _useTransparency = true;
+    QRect _inner;
+    Style _st;
+    QMargins _padding;
+    QRect rect() const { return {}; }
+    int width() const { return 120; }
+    int height() const { return 180; }
+    void paintBg(QPainter&);
+};
+"""
+
+
+def main() -> None:
+    cli = argparse.ArgumentParser(description=__doc__)
+    cli.add_argument("--ayugram", type=Path, required=True)
+    root = cli.parse_args().ayugram / "Telegram/lib_ui/ui/widgets"
+    popup = (root / "popup_menu.cpp").read_text(encoding="utf-8")
+    menu = (root / "menu/menu.cpp").read_text(encoding="utf-8")
+    required = [
+        '_menu->setProperty("ayugramGlassPopupRootPaint", true);',
+        '_menu->property("ayugramGlassPopupRootPaint").toBool()',
+        'p.fillRect(_inner, _st.menu.itemBg);',
+        'p.fillRect(rect(), Qt::transparent);',
+        'QPainter::CompositionMode_Source',
+    ]
+    for needle in required:
+        if popup.count(needle) != 1:
+            raise RuntimeError(f"Popup policy missing or repeated: {needle}")
+    if menu.count('property("ayugramGlassPopupRootPaint").toBool()') != 1:
+        raise RuntimeError("Nested menu duplicates the root translucent background")
+    method = extract(popup, "void PopupMenu::paintBg(QPainter &p) {")
+    with tempfile.TemporaryDirectory(prefix="ayugram-popup-preflight-") as tmp:
+        path = Path(tmp) / "popup_paint.cpp"
+        path.write_text(STUB + "\n" + method + "\n", encoding="utf-8")
+        for platform, flags in [("Windows", ["/DQ_OS_WIN"]), ("other", [])]:
+            result = subprocess.run(
+                ["cl.exe", "/nologo", "/std:c++17", "/Zs", *flags, str(path)],
+                capture_output=True, text=True,
+            )
+            print(f"{platform} popup background MSVC syntax: "
+                  f"{'PASS' if result.returncode == 0 else 'FAIL'}")
+            if result.stdout:
+                print(result.stdout)
+            if result.stderr:
+                print(result.stderr)
+            if result.returncode:
+                raise RuntimeError(f"{platform} popup background C++ check failed")
+    print("Popup background root/child ownership policy: PASS")
+
+
+if __name__ == "__main__":
+    main()

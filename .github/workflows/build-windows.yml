@@ -52,7 +52,9 @@ jobs:
             @{ base = $uiBase; path = 'Telegram/lib_ui/ui/colors.palette'; source = 'ui/colors.palette' },
             @{ base = $uiBase; path = 'Telegram/lib_ui/ui/style/style_core_palette.h'; source = 'ui/style/style_core_palette.h' },
             @{ base = $uiBase; path = 'Telegram/lib_ui/ui/style/style_core_palette.cpp'; source = 'ui/style/style_core_palette.cpp' },
-            @{ base = $uiBase; path = 'Telegram/lib_ui/ui/widgets/scroll_area.cpp'; source = 'ui/widgets/scroll_area.cpp' }
+            @{ base = $uiBase; path = 'Telegram/lib_ui/ui/widgets/scroll_area.cpp'; source = 'ui/widgets/scroll_area.cpp' },
+            @{ base = $uiBase; path = 'Telegram/lib_ui/ui/widgets/popup_menu.cpp'; source = 'ui/widgets/popup_menu.cpp' },
+            @{ base = $uiBase; path = 'Telegram/lib_ui/ui/widgets/menu/menu.cpp'; source = 'ui/widgets/menu/menu.cpp' }
           )
           foreach ($file in $sources) {
             $target = Join-Path $root $file.path
@@ -76,6 +78,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Glass peer list/static painting preflight failed.' }
           python scripts/preflight_internal_blur.py --ayugram $root
           if ($LASTEXITCODE -ne 0) { throw 'Internal Qt backdrop blur validation failed.' }
+          python scripts/preflight_popup_cpp.py --ayugram $root
+          if ($LASTEXITCODE -ne 0) { throw 'Popup menu compositor validation failed.' }
           Write-Host 'Pinned AyuGram patch anchors and chat C++ syntax verified.'
 
   windows-x64:

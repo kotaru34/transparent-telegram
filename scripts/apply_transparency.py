@@ -415,6 +415,101 @@ def patch_info_content(root: Path) -> None:
     print("Patched:", path)
 
 
+def patch_popup_menu(root: Path) -> None:
+    """Keep the themed backdrop visible after popup opening animations end.
+
+    The transition frame contains a background painted into a cached image,
+    but live PopupMenu::paintBg() normally paints *only* the fallback shadow.
+    On Windows layered windows the live backdrop can disappear when the
+    cached frame is discarded and child widgets are shown. The popup root
+    now owns the single backdrop; the child Menu skips its duplicate fill.
+    """
+    popup = root / "Telegram/lib_ui/ui/widgets/popup_menu.cpp"
+    menu = root / "Telegram/lib_ui/ui/widgets/menu/menu.cpp"
+    if "ayugramGlassPopupRootPaint" in popup.read_text(encoding="utf-8"):
+        if "ayugramGlassPopupRootPaint" not in menu.read_text(encoding="utf-8"):
+            raise RuntimeError("Partial popup menu patch: missing child painter update")
+        print("Already patched:", popup, menu)
+        return
+
+    def apply(path: Path, replacements: list[tuple[str, str]]) -> None:
+        source = path.read_text(encoding="utf-8")
+        for old, new in replacements:
+            count = source.count(old)
+            if count != 1:
+                raise RuntimeError(
+                    f"{path}: popup anchor mismatch ({count}): {old[:90]!r}"
+                )
+            source = source.replace(old, new, 1)
+        path.write_text(source, encoding="utf-8", newline="\n")
+        print("Patched:", path)
+
+    apply(popup, [
+        (
+            "\t_useTransparency = Platform::TranslucentWindowsSupported();\n"
+            "\tif (_useTransparency) {\n"
+            "\t\tsetAttribute(Qt::WA_TranslucentBackground, true);",
+            """\t_useTransparency = Platform::TranslucentWindowsSupported();
+\tif (_useTransparency) {
+\t\tsetAttribute(Qt::WA_TranslucentBackground, true);
+#ifdef Q_OS_WIN
+\t\t// Transparent AyuGram: native popup owns its live background,
+\t\t// including after the initial cached show animation is gone.
+\t\t_menu->setProperty("ayugramGlassPopupRootPaint", true);
+#endif""",
+        ),
+        (
+            "void PopupMenu::paintBg(QPainter &p) {\n"
+            "\tif (!_useTransparency) {",
+            """void PopupMenu::paintBg(QPainter &p) {
+#ifdef Q_OS_WIN
+\tif (_useTransparency) {
+\t\t// Clear old backing-store pixels and replace them once with
+\t\t// the actual themed popup color. Never alpha-blend old frames.
+\t\tp.setCompositionMode(QPainter::CompositionMode_Source);
+\t\tp.fillRect(rect(), Qt::transparent);
+\t\tp.fillRect(_inner, _st.menu.itemBg);
+\t\tp.setCompositionMode(QPainter::CompositionMode_SourceOver);
+\t\treturn;
+\t}
+#endif
+\tif (!_useTransparency) {""",
+        ),
+        (
+            "\tpaddingWrap->paintRequest(\n"
+            "\t) | rpl::on_next([=](QRect clip) {\n"
+            "\t\tconst auto top = clip.intersected(",
+            """\tpaddingWrap->paintRequest(
+\t) | rpl::on_next([=](QRect clip) {
+#ifdef Q_OS_WIN
+\t\t// The live popup root paints the whole backdrop and padding.
+\t\t// Duplicate translucent fills would make these edges darker.
+\t\tif (_menu->property("ayugramGlassPopupRootPaint").toBool()) {
+\t\t\treturn;
+\t\t}
+#endif
+\t\tconst auto top = clip.intersected(""",
+        ),
+    ])
+    apply(menu, [
+        (
+            "\tpaintRequest(\n"
+            "\t) | rpl::on_next([=](const QRect &clip) {\n"
+            "\t\tQPainter(this).fillRect(clip, _st.itemBg);",
+            """\tpaintRequest(
+\t) | rpl::on_next([=](const QRect &clip) {
+#ifdef Q_OS_WIN
+\t\t// Transparent AyuGram: the PopupMenu top-level paints this
+\t\t// background in its own backing store after animation ends.
+\t\tif (property("ayugramGlassPopupRootPaint").toBool()) {
+\t\t\treturn;
+\t\t}
+#endif
+\t\tQPainter(this).fillRect(clip, _st.itemBg);""",
+        ),
+    ])
+
+
 def patch_palette(root: Path) -> None:
     header = root / "Telegram/lib_ui/ui/style/style_core_palette.h"
     patch_one(
@@ -546,6 +641,7 @@ def main() -> None:
     patch_dialogs(root)
     patch_peer_lists(root)
     patch_info_content(root)
+    patch_popup_menu(root)
     patch_palette(root)
     print("Transparent AyuGram: all patches applied")
 
