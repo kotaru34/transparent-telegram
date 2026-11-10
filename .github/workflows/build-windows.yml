@@ -74,6 +74,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Glass scroll C++ syntax preflight failed.' }
           python scripts/preflight_peer_lists.py --ayugram $root
           if ($LASTEXITCODE -ne 0) { throw 'Glass peer list/static painting preflight failed.' }
+          python scripts/preflight_internal_blur.py --ayugram $root
+          if ($LASTEXITCODE -ne 0) { throw 'Internal Qt backdrop blur validation failed.' }
           Write-Host 'Pinned AyuGram patch anchors and chat C++ syntax verified.'
 
   windows-x64:

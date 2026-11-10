@@ -31,7 +31,7 @@ def main() -> None:
     require(
         root / "Telegram/SourceFiles/info/info_content_widget.cpp",
         "Transparent AyuGram: Info/settings layers have alpha",
-        "This is alpha-correct compositing, not a backdrop blur.",
+        "setAttribute(Qt::WA_OpaquePaintEvent, false);",
     )
 
 

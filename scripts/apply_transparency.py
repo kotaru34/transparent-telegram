@@ -47,6 +47,80 @@ void MainWindow::initHook()""",
     )
 
 
+def patch_internal_backdrop_blur(root: Path) -> None:
+    # Called after patch_window() which already modified mainwindow.cpp.
+    # That file contains MARK, so patch_one() would skip it; use a unique
+    # feature marker for this independent change instead.
+    path = root / "Telegram/SourceFiles/mainwindow.cpp"
+    source = path.read_text(encoding="utf-8")
+    if "AyuGramGlassBackdropEffect" in source:
+        print("Already patched:", path)
+        return
+
+    replacements = [
+        (
+            "#include <QtGui/QWindow>\n",
+            """#include <QtGui/QWindow>
+#ifdef Q_OS_WIN
+#include <QtWidgets/QGraphicsBlurEffect>
+#endif
+""",
+        ),
+        (
+            "void MainWindow::ensureLayerCreated() {\n"
+            "\tif (_layer) {\n"
+            "\t\treturn;\n"
+            "\t}\n",
+            """void MainWindow::ensureLayerCreated() {
+\tif (_layer) {
+\t\treturn;
+\t}
+#ifdef Q_OS_WIN
+\t// Transparent AyuGram: native Qt blur of the application content
+\t// underneath modal layers, not a Windhawk effect on individual
+\t// widgets. Remove it once the layer stack is destroyed.
+\tif (testAttribute(Qt::WA_TranslucentBackground)
+\t\t&& qEnvironmentVariableIsEmpty("AYUGRAM_NO_INTERNAL_BLUR")
+\t\t&& _main && !_main->graphicsEffect()) {
+\t\tauto blur = new QGraphicsBlurEffect(_main.data());
+\t\tblur->setObjectName(QStringLiteral("AyuGramGlassBackdropEffect"));
+\t\tblur->setBlurRadius(15.);
+\t\tblur->setBlurHints(QGraphicsBlurEffect::QualityHint);
+\t\t_main->setGraphicsEffect(blur);
+\t}
+#endif
+""",
+        ),
+        (
+            "void MainWindow::destroyLayer() {\n"
+            "\tif (!_layer) {\n"
+            "\t\treturn;\n"
+            "\t}\n",
+            """void MainWindow::destroyLayer() {
+\tif (!_layer) {
+\t\treturn;
+\t}
+#ifdef Q_OS_WIN
+\tif (_main && _main->graphicsEffect()
+\t\t&& _main->graphicsEffect()->objectName()
+\t\t\t== QStringLiteral("AyuGramGlassBackdropEffect")) {
+\t\t_main->setGraphicsEffect(nullptr);
+\t}
+#endif
+""",
+        ),
+    ]
+    for before, after in replacements:
+        count = source.count(before)
+        if count != 1:
+            raise RuntimeError(
+                f"{path}: backdrop blur anchor mismatch ({count}): {before[:85]!r}"
+            )
+        source = source.replace(before, after, 1)
+    path.write_text(source, encoding="utf-8", newline="\n")
+    print("Patched:", path)
+
+
 def patch_chat(root: Path) -> None:
     patch_one(
         root / "Telegram/SourceFiles/window/section_widget.cpp",
@@ -329,19 +403,6 @@ def patch_info_content(root: Path) -> None:
 #endif
 \t_controller->wrapValue(""",
         ),
-        (
-            "void ContentWidget::paintEvent(QPaintEvent *e) {\n"
-            "\tauto p = QPainter(this);",
-            """void ContentWidget::paintEvent(QPaintEvent *e) {
-\tauto p = QPainter(this);
-#ifdef Q_OS_WIN
-\tif (window()->testAttribute(Qt::WA_TranslucentBackground)) {
-\t\t// Replace prior frame pixels, including hover/focus artifacts.
-\t\t// This is alpha-correct compositing, not a backdrop blur.
-\t\tp.setCompositionMode(QPainter::CompositionMode_Source);
-\t}
-#endif""",
-        ),
     ]
     for before, after in replacements:
         count = source.count(before)
@@ -478,6 +539,7 @@ def main() -> None:
     if not (root / "Telegram/lib_ui/ui/colors.palette").is_file():
         parser.error("AyuGram source or its lib_ui submodule is missing")
     patch_window(root)
+    patch_internal_backdrop_blur(root)
     patch_chat(root)
     patch_main_menu(root)
     patch_scroll(root)

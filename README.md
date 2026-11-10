@@ -58,3 +58,9 @@ Run `scripts/preflight_glass_cpp.py` in the Windows Actions preflight to
 syntax-check the exact patched scroll methods with MSVC in both Windows and
 ordinary configurations. This does not replace a full integration build or
 visual testing.
+
+## Native Qt blur under modal menus
+
+On Windows only, `MainWindow::ensureLayerCreated` now temporarily installs a Qt `QGraphicsBlurEffect` with a 15-pixel radius on the *underlying main content widget* when opening an in-app modal layer. This blurs the actual chat text and avatar content rather than using Windows wallpaper blur, and does not attach Windhawk to each button or menu row. It is removed after the layer stack closes. This is a modal **background** effect, so the full underlying main area (including outside the panel) is blurred while the modal is open; the panel itself remains sharp. Set the environment variable `AYUGRAM_NO_INTERNAL_BLUR=1` before launching to disable the Qt effect for compatibility testing without recompiling.
+
+It is a deliberately small Qt Widgets implementation rather than a source-capture shader compositor. Visual appearance, frame rate and Qt/Windows compatibility still need to be tested on the actual Windows desktop. 
