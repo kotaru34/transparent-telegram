@@ -83,7 +83,7 @@ def main() -> None:
     ]
     for needle in required:
         count = popup.count(needle)
-        expected = 2 if needle == "p.fillRect(_inner, _st.menu.itemBg);" else 1
+        expected = 2 if needle in ("p.fillRect(_inner, _st.menu.itemBg);", "p.setCompositionMode(QPainter::CompositionMode_Source);") else 1
         if count != expected:
             raise RuntimeError(f"Popup policy occurrence mismatch: {needle}: {count}")
     if menu.count('property("ayugramGlassPopupAlphaFill").toBool()') != 1:
