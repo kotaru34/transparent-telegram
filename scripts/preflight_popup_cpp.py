@@ -18,7 +18,7 @@ def extract(source: str, signature: str) -> str:
     start = source.find(signature)
     if start < 0 or source.find(signature, start + 1) >= 0:
         raise RuntimeError(f"Expected exactly one {signature}")
-    begin = source.find("{", start + len(signature))
+    begin = start + len(signature) - 1 if signature.endswith("{") else source.find("{", start + len(signature))
     if begin < 0:
         raise RuntimeError("Missing body")
     depth = 0
@@ -82,8 +82,10 @@ def main() -> None:
         'QPainter::CompositionMode_Source',
     ]
     for needle in required:
-        if popup.count(needle) != 1:
-            raise RuntimeError(f"Popup policy missing or repeated: {needle}")
+        count = popup.count(needle)
+        expected = 2 if needle == "p.fillRect(_inner, _st.menu.itemBg);" else 1
+        if count != expected:
+            raise RuntimeError(f"Popup policy occurrence mismatch: {needle}: {count}")
     if menu.count('property("ayugramGlassPopupRootPaint").toBool()') != 1:
         raise RuntimeError("Nested menu duplicates the root translucent background")
     method = extract(popup, "void PopupMenu::paintBg(QPainter &p) {")
