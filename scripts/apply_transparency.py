@@ -457,7 +457,8 @@ def patch_popup_menu(root: Path) -> None:
 \t\t_menu->setProperty("ayugramGlassPopupAlphaFill", true);
 \t\t// The DestinationIn corner mask must be alpha=255 inside the
 \t\t// rounded shape: using menuBg alpha repeatedly erodes the menu.
-\t\t_roundRect.setColor(st::windowFg);
+\t\tstatic const auto kOpaqueRoundingMask = style::owned_color(QColor(255, 255, 255, 255));
+\t\t_roundRect.setColor(kOpaqueRoundingMask.color());
 #endif""",
         ),
         (
