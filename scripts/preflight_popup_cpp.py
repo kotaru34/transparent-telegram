@@ -79,7 +79,7 @@ def main() -> None:
         '_menu->property("ayugramGlassPopupRootPaint").toBool()',
         'p.fillRect(_inner, _st.menu.itemBg);',
         'p.fillRect(rect(), Qt::transparent);',
-        'QPainter::CompositionMode_Source',
+        'p.setCompositionMode(QPainter::CompositionMode_Source);',
     ]
     for needle in required:
         count = popup.count(needle)
