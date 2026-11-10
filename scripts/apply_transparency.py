@@ -247,6 +247,113 @@ def patch_dialogs(root: Path) -> None:
     print("Patched:", path)
 
 
+def patch_peer_lists(root: Path) -> None:
+    path = root / "Telegram/SourceFiles/boxes/peer_list_box.cpp"
+    source = path.read_text(encoding="utf-8")
+    if MARK in source:
+        print("Already patched:", path)
+        return
+
+    replacements = [
+        (
+            "\tif (_rowsScrollCache.scrolling()\n"
+            "\t\t&& !selected",
+            """\tif (_rowsScrollCache.scrolling()
+#ifdef Q_OS_WIN
+\t\t// Transparent AyuGram: this shared cache stores Format_RGB32.
+\t\t// Contacts, members and Calls must not blit opaque cached rows.
+\t\t&& !window()->testAttribute(Qt::WA_TranslucentBackground)
+#endif
+\t\t&& !selected""",
+        ),
+        (
+            "\tfor (const auto &rect : fill) {\n"
+            "\t\t\tp.fillRect(rect, _st.item.button.textBg);\n"
+            "\t\t}",
+            """\tfor (const auto &rect : fill) {
+#ifdef Q_OS_WIN
+\t\t\tif (window()->testAttribute(Qt::WA_TranslucentBackground)) {
+\t\t\t\tp.setCompositionMode(QPainter::CompositionMode_Source);
+\t\t\t}
+#endif
+\t\t\tp.fillRect(rect, _st.item.button.textBg);
+#ifdef Q_OS_WIN
+\t\t\tp.setCompositionMode(QPainter::CompositionMode_SourceOver);
+#endif
+\t\t}""",
+        ),
+        (
+            "\tp.fillRect(0, 0, outerWidth, _rowHeight, bg);\n"
+            "\trow->paintRipple(",
+            """#ifdef Q_OS_WIN
+\tif (window()->testAttribute(Qt::WA_TranslucentBackground)) {
+\t\t// Replace stale pixels beneath the row, don't blend a translucent
+\t\t// row with copies left over from previous scroll/resize frames.
+\t\tp.setCompositionMode(QPainter::CompositionMode_Source);
+\t}
+#endif
+\tp.fillRect(0, 0, outerWidth, _rowHeight, bg);
+#ifdef Q_OS_WIN
+\tp.setCompositionMode(QPainter::CompositionMode_SourceOver);
+#endif
+\trow->paintRipple(""",
+        ),
+    ]
+    for before, after in replacements:
+        count = source.count(before)
+        if count != 1:
+            raise RuntimeError(
+                f"{path}: peer list anchor mismatch (expected 1, found {count}): {before[:70]!r}"
+            )
+        source = source.replace(before, after, 1)
+    path.write_text(source, encoding="utf-8", newline="\n")
+    print("Patched:", path)
+
+
+def patch_info_content(root: Path) -> None:
+    path = root / "Telegram/SourceFiles/info/info_content_widget.cpp"
+    source = path.read_text(encoding="utf-8")
+    if MARK in source:
+        print("Already patched:", path)
+        return
+    replacements = [
+        (
+            "\tsetAttribute(Qt::WA_OpaquePaintEvent);\n"
+            "\t_controller->wrapValue(",
+            """#ifdef Q_OS_WIN
+\t// Transparent AyuGram: Info/settings layers have alpha, so they
+\t// must not advertise opaque backing-store contents to Qt.
+\tsetAttribute(Qt::WA_OpaquePaintEvent, false);
+#else
+\tsetAttribute(Qt::WA_OpaquePaintEvent);
+#endif
+\t_controller->wrapValue(""",
+        ),
+        (
+            "void ContentWidget::paintEvent(QPaintEvent *e) {\n"
+            "\tauto p = QPainter(this);",
+            """void ContentWidget::paintEvent(QPaintEvent *e) {
+\tauto p = QPainter(this);
+#ifdef Q_OS_WIN
+\tif (window()->testAttribute(Qt::WA_TranslucentBackground)) {
+\t\t// Replace prior frame pixels, including hover/focus artifacts.
+\t\t// This is alpha-correct compositing, not a backdrop blur.
+\t\tp.setCompositionMode(QPainter::CompositionMode_Source);
+\t}
+#endif""",
+        ),
+    ]
+    for before, after in replacements:
+        count = source.count(before)
+        if count != 1:
+            raise RuntimeError(
+                f"{path}: info content anchor mismatch (expected 1, found {count}): {before[:70]!r}"
+            )
+        source = source.replace(before, after, 1)
+    path.write_text(source, encoding="utf-8", newline="\n")
+    print("Patched:", path)
+
+
 def patch_palette(root: Path) -> None:
     header = root / "Telegram/lib_ui/ui/style/style_core_palette.h"
     patch_one(
@@ -375,6 +482,8 @@ def main() -> None:
     patch_main_menu(root)
     patch_scroll(root)
     patch_dialogs(root)
+    patch_peer_lists(root)
+    patch_info_content(root)
     patch_palette(root)
     print("Transparent AyuGram: all patches applied")
 
